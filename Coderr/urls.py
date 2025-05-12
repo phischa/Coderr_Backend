@@ -21,4 +21,5 @@ from Coderr_app.api import urls as coderr_app_urls
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include(coderr_app_urls)),
+    path('user_auth/', include('user_auth_app.api.urls')),
 ]

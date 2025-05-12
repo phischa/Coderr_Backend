@@ -21,5 +21,6 @@ from Coderr_app.api import urls as coderr_app_urls
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include(coderr_app_urls)),
-    path('user_auth/', include('user_auth_app.api.urls')),
+    path('api-auth', include('rest_framework.urls')),
+    path('api/', include('Coderr_app.api.urls')),
 ]

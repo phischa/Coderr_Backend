@@ -7,8 +7,6 @@ class UserSerializer(serializers.ModelSerializer):
     
     Ensures that the password is only used for writing and is securely stored.
     """
-    userID = serializers.IntegerField(source='id', read_only=True)
-    name = serializers.CharField(source='username')
     
     class Meta:
         model = User

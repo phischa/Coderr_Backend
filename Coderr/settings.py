@@ -10,17 +10,23 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
+# Load environment variables from .env file
+load_dotenv(BASE_DIR / '.env')
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-nak&%!5mc^x=b#45u$qs3tpllzi$q6!b^raf6vu+%fxtz&#2kj'
+SECRET_KEY = os.getenv('SECRET_KEY')
+
+# Add a fallback for development (remove in production)
+if not SECRET_KEY:
+    SECRET_KEY = 'django-insecure-temporary-dev-key-change-this'
+    print("WARNING: Using a temporary SECRET_KEY. Set a proper SECRET_KEY in your .env file.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -37,9 +43,15 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # 'corsheaders',
+    'rest_framework',
+    'rest_framework.authtoken',
+    'Coderr_app',
+    #'user_auth_app',
 ]
 
 MIDDLEWARE = [
+    # 'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',

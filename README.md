@@ -1,4 +1,4 @@
-# Backend for Kanban App "Join"
+# Backend for freelancer platfrom "Coderr"
 
 ## Description
 

@@ -42,49 +42,67 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         model = Profile
         fields = ['file', 'location', 'tel', 'description', 'working_hours', 
                     'first_name', 'last_name', 'email']
+    
+    def update(self, instance, validated_data):
+        user = instance.user
+        if 'first_name' in validated_data:
+            user.first_name = validated_data.pop('first_name')
+        if 'last_name' in validated_data:
+            user.last_name = validated_data.pop('last_name')
+        if 'email' in validated_data:
+            user.email = validated_data.pop('email')
+        user.save()
+        
+        return super().update(instance, validated_data)
 
 class RegistrationSerializer(serializers.ModelSerializer):
     """
     Serializer for user registration.
-    
-    Handles the creation of new User objects with proper password validation.
-    Includes validation to ensure password confirmation matches and
-    that the email is not already in use.
+    Includes profile type selection.
     """
-    repeated_password = serializers.CharField(write_only=True, required=True)
+    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    confirm_password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    type = serializers.ChoiceField(choices=Profile.USER_TYPES, required=True)
+    first_name = serializers.CharField(required=False)
+    last_name = serializers.CharField(required=False)
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'password', 'repeated_password']
-        extra_kwargs = {
-            'password': {'write_only': True},
-            'id': {'read_only': True}
-        }
+        fields = ['username', 'email', 'password', 'confirm_password', 'type', 'first_name', 'last_name']
     
-    def save(self):
-        """
-        Creates and saves a new User.
-        
-        Validates that passwords match and the email is unique
-        before creating the user with a securely hashed password.
-        
-        Returns:
-            User: The newly created User object.
-            
-        Raises:
-            ValidationError: If passwords don't match or email already exists.
-        """
-        pw = self.validated_data['password']
-        repeated_pw = self.validated_data['repeated_password']
+    def validate(self, data):
         email = self.validated_data['email']
-
-        if pw != repeated_pw:
-            raise serializers.ValidationError({'password': 'Passwords do not match'})
-        
+        if data['password'] != data['confirm_password']:
+            raise serializers.ValidationError("Passwords do not match.")
         if User.objects.filter(email=email).exists():
             raise serializers.ValidationError({'email': 'Email already exists'})
+        return data
+    
+    def create(self, validated_data):
+        user_type = validated_data.pop('type')
+        validated_data.pop('confirm_password')
         
-        account = User(email=email, username=self.validated_data['username'])
-        account.set_password(pw)
-        account.save()
-        return account
+        first_name = validated_data.pop('first_name', '')
+        last_name = validated_data.pop('last_name', '')
+        
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data['email'],
+            password=validated_data['password'],
+            first_name=first_name,
+            last_name=last_name
+        )
+        
+        profile = user.profile
+        profile.type = user_type
+        profile.save()
+        
+        return user
+
+class LoginSerializer(serializers.Serializer):
+    """
+    Serializer for login.
+    Accepts username/email and password.
+    """
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(max_length=128, write_only=True, style={'input_type': 'password'})

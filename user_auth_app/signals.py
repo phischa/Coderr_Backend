@@ -1,15 +1,15 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.auth.models import User
-from user_auth_app.models import UserProfile
+from .models import Profile
 
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     """
-    Signal handler to automatically create a UserProfile when a User is created.
+    Signal handler to automatically create a Profile when a User is created.
     
     This function is connected to Django's post_save signal for the User model
-    and will create a corresponding UserProfile instance for newly created users.
+    and will create a corresponding Profile instance for newly created users.
     
     Args:
         sender: The model class that sent the signal (User)
@@ -18,15 +18,18 @@ def create_user_profile(sender, instance, created, **kwargs):
         **kwargs: Additional keyword arguments from the signal
     """
     if created:
-        UserProfile.objects.create(user=instance)
+        Profile.objects.create(
+            user=instance, 
+            type='customer' 
+        )
 
 @receiver(post_save, sender=User)
 def save_user_profile(sender, instance, **kwargs):
     """
-    Signal handler to save the UserProfile when a User is saved.
+    Signal handler to save the Profile when a User is saved.
     
     This function is connected to Django's post_save signal for the User model
-    and ensures the associated UserProfile is updated whenever a User is saved.
+    and ensures the associated Profile is updated whenever a User is saved.
     If no profile exists, it creates one to maintain data integrity.
     
     Args:
@@ -37,5 +40,7 @@ def save_user_profile(sender, instance, **kwargs):
     try:
         instance.profile.save()
     except User.profile.RelatedObjectDoesNotExist:
-        UserProfile.objects.create(user=instance)
-        print(f"Profile for {instance.username} created")
+        Profile.objects.create(
+            user=instance,
+            type='customer'
+        )

@@ -1,4 +1,3 @@
-
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
@@ -54,15 +53,6 @@ def registration_view(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class UserProfileList(generics.ListCreateAPIView):
-    """
-    API view for listing all user profiles or creating a new one.
-    
-    Provides GET (list all profiles) and POST (create profile) functionality.
-    """
-    queryset = UserProfile.objects.all()
-    serializer_class = UserProfileSerializer
-
 class ProfileViewSet(viewsets.ModelViewSet):
     """API endpoint for user profiles"""
     queryset = Profile.objects.all()
@@ -87,96 +77,6 @@ class ProfileViewSet(viewsets.ModelViewSet):
         profiles = Profile.objects.filter(type='customer')
         serializer = self.get_serializer(profiles, many=True)
         return Response(serializer.data)
-
-class RegistrationView(APIView):
-    """
-    API view for user registration.
-    
-    Handles user creation with validation for passwords and email uniqueness.
-    Returns an authentication token upon successful registration.
-    Accessible to unauthenticated users.
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        """
-        Process a registration request.
-        
-        Validates user data, creates a new user, and returns an auth token.
-        Formats validation errors in a frontend-friendly structure.
-        
-        Args:
-            request: The HTTP request containing registration data.
-            
-        Returns:
-            Response: Success response with token, username, email, and userID,
-            or error response with validation details.
-        """
-        serializer = RegistrationSerializer(data=request.data)
-        
-        if serializer.is_valid():
-            try:
-                saved_account = serializer.save()
-                token, created = Token.objects.get_or_create(user=saved_account)
-                return Response({
-                    'status': 'success',
-                    'token': token.key,
-                    'username': saved_account.username,
-                    'email': saved_account.email,
-                    'userID': saved_account.id  # ID zurückgeben für Frontend
-                })
-            except Exception as e:
-                return Response({
-                    'status': 'error',
-                    'message': str(e)
-                }, status=500)
-        else:
-            # Formatierter Fehler mit flacher Struktur für einfachere Frontend-Verarbeitung
-            errors = {}
-            for field, error_msgs in serializer.errors.items():
-                errors[field] = error_msgs[0] if error_msgs else "Invalid data"
-            
-            return Response({
-                'status': 'error',
-                'errors': errors
-            }, status=400)
-    
-class CustomLoginView(ObtainAuthToken):
-    """
-    Custom login view that extends Django REST framework's ObtainAuthToken.
-    
-    Provides token-based authentication with a simplified response structure.
-    Accessible to unauthenticated users.
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        """
-        Process a login request.
-        
-        Validates credentials and returns user information with an auth token.
-        
-        Args:
-            request: The HTTP request containing login credentials.
-            
-        Returns:
-            Response: User information and token on success,
-            or validation errors on failure.
-        """
-        serializer = self.serializer_class(data=request.data)
-        data = {}
-
-        if serializer.is_valid():
-            user = serializer.validated_data['user']
-            token, created = Token.objects.get_or_create(user=user)
-            data = {
-                'token': token.key,
-                'username': user.username,
-                'email': user.email
-            }
-        else: 
-            data = serializer.errors
-        return Response(data)
 
 class GuestLoginView(APIView):
     """
@@ -211,6 +111,7 @@ class GuestLoginView(APIView):
         )
         profile = guest_user.profile
         profile.is_guest = True
+        profile.type = 'customer'  # Default guest to customer type
         profile.save()
         
         token, _ = Token.objects.get_or_create(user=guest_user)
@@ -218,7 +119,7 @@ class GuestLoginView(APIView):
         return Response({
             'status': 'success',
             'token': token.key,
+            'user_id': guest_user.id,
             'username': guest_username,
-            'email': f"{guest_username}@example.com",
             'is_guest': True
         })

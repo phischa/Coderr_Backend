@@ -12,7 +12,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'first_name', 'last_name', 'email']
         read_only_fields = ['id']
 
-class ProfileSerialiszer(serializers.ModelSerializer):
+class ProfileSerializer(serializers.ModelSerializer):
     """
     Serializer for the Profile model.
     Includes user data through nested serializer.

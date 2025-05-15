@@ -1,31 +1,58 @@
-from rest_framework import generics, status
-from user_auth_app.models import UserProfile
-from .serializers import UserProfileSerializer, RegistrationSerializer
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.authtoken.models import Token
-from rest_framework.authtoken.views import ObtainAuthToken
-from rest_framework.response import Response
+
+from django.shortcuts import get_object_or_404
+from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import api_view, action, permission_classes
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
+from rest_framework.authtoken.models import Token
+from rest_framework.views import APIView
 import uuid
-import logging
 
-logger = logging.getLogger(__name__)
+from user_auth_app.models import Profile
+from .serializers import (
+    UserSerializer, ProfileSerializer, ProfileUpdateSerializer,
+    RegistrationSerializer, LoginSerializer
+)
 
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def guest_test(request):
-    """
-    Test endpoint accessible to unauthenticated users.
-    
-    Args:
-        request: The HTTP request object.
+
+@api_view(['POST'])
+def login_view(request):
+    """Handle user login and return auth token"""
+    serializer = LoginSerializer(data=request.data)
+    if serializer.is_valid():
+        username = serializer.validated_data['username']
+        password = serializer.validated_data['password']
+        user = authenticate(username=username, password=password)
         
-    Returns:
-        Response: A success message indicating the endpoint works.
-    """
-    return Response({"message": "Guest test endpoint works!"})
+        if user:
+            token, _ = Token.objects.get_or_create(user=user)
+            return Response({
+                'token': token.key,
+                'user_id': user.id,
+                'username': user.username
+            })
+        
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+def registration_view(request):
+    """Handle user registration"""
+    serializer = RegistrationSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.save()
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({
+            'token': token.key,
+            'user_id': user.id,
+            'username': user.username
+        })
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class UserProfileList(generics.ListCreateAPIView):
     """
@@ -36,15 +63,30 @@ class UserProfileList(generics.ListCreateAPIView):
     queryset = UserProfile.objects.all()
     serializer_class = UserProfileSerializer
 
-class UserProfileDetail(generics.RetrieveUpdateDestroyAPIView):
-    """
-    API view for retrieving, updating, or deleting a specific user profile.
+class ProfileViewSet(viewsets.ModelViewSet):
+    """API endpoint for user profiles"""
+    queryset = Profile.objects.all()
+    serializer_class = ProfileSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
     
-    Provides GET (retrieve), PUT/PATCH (update), and DELETE functionality
-    for individual profiles identified by their primary key.
-    """
-    queryset = UserProfile.objects.all()
-    serializer_class = UserProfileSerializer
+    def get_serializer_class(self):
+        if self.action in ['update', 'partial_update']:
+            return ProfileUpdateSerializer
+        return ProfileSerializer
+    
+    @action(detail=False, methods=['GET'], url_path='business')
+    def business_profiles(self, request):
+        """List all business profiles"""
+        profiles = Profile.objects.filter(type='business')
+        serializer = self.get_serializer(profiles, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['GET'], url_path='customer')
+    def customer_profiles(self, request):
+        """List all customer profiles"""
+        profiles = Profile.objects.filter(type='customer')
+        serializer = self.get_serializer(profiles, many=True)
+        return Response(serializer.data)
 
 class RegistrationView(APIView):
     """

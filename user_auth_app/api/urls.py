@@ -1,11 +1,17 @@
-from django.urls import path
-from .views import UserProfileList, UserProfileDetail, RegistrationView, CustomLoginView, GuestLoginView
-from rest_framework.authtoken.views import obtain_auth_token
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from . import views
+
+# Create a router for our viewsets
+router = DefaultRouter()
+router.register(r'profiles', views.ProfileViewSet)
 
 urlpatterns = [
-    path('guest-login/', GuestLoginView.as_view(), name='guest-login'),
-    path('profiles/', UserProfileList.as_view(), name='userprofile-list'),
-    path('profiles/<int:pk>/', UserProfileDetail.as_view(), name='userprofile-detail'),
-    path('registration/', RegistrationView.as_view(), name='registration'),
-    path('login/', CustomLoginView.as_view(), name='login'),
+    path('login/', views.login_view, name='login'),
+    path('registration/', views.registration_view, name='registration'),
+    path('guest-login/', views.GuestLoginView.as_view(), name='guest-login'),
+    path('profile/<int:pk>/', views.ProfileViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update'}), name='profile-detail'),
+    path('profiles/business/', views.ProfileViewSet.as_view({'get': 'business_profiles'}), name='business-profiles'),
+    path('profiles/customer/', views.ProfileViewSet.as_view({'get': 'customer_profiles'}), name='customer-profiles'),
+    path('', include(router.urls)),
 ]

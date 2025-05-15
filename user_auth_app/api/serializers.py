@@ -1,17 +1,47 @@
 from rest_framework import serializers
-from user_auth_app.models import UserProfile
 from django.contrib.auth.models import User
+from user_auth_app.models import Profile
 
-class UserProfileSerializer(serializers.ModelSerializer):
+
+class UserSerializer(serializers.ModelSerializer):
     """
-    Serializer for the UserProfile model.
-    
-    Provides serialization for UserProfile objects,
-    including user reference and email fields.
+    Serializer for the User model.
     """
     class Meta:
-        model = UserProfile
-        fields = ['user', 'email']
+        model = Profile
+        fields = ['id', 'username', 'first_name', 'last_name', 'email']
+        read_only_fields = ['id']
+
+class ProfileSerialiszer(serializers.ModelSerializer):
+    """
+    Serializer for the Profile model.
+    Includes user data through nested serializer.
+    """
+    username = serializers.ReadOnlyField()
+    first_name = serializers.ReadOnlyField()
+    last_name = serializers.ReadOnlyField()
+    email = serializers.ReadOnlyField()
+    
+    class Meta:
+        model = Profile
+        fields = ['user', 'file', 'location', 'tel', 'description', 'working_hours', 
+                    'type', 'created_at', 'username', 'first_name', 'last_name', 'email']
+        read_only_fields = ['user', 'created_at']
+
+
+class ProfileUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating Profile objects.
+    Allows updating both User and Profile fields.
+    """
+    first_name = serializers.CharField(write_only=True, required=False)
+    last_name = serializers.CharField(write_only=True, required=False)
+    email = serializers.EmailField(write_only=True, required=False)
+    
+    class Meta:
+        model = Profile
+        fields = ['file', 'location', 'tel', 'description', 'working_hours', 
+                    'first_name', 'last_name', 'email']
 
 class RegistrationSerializer(serializers.ModelSerializer):
     """

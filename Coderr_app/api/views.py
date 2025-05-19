@@ -1,99 +1,3 @@
-# from rest_framework import viewsets, status
-# from rest_framework.decorators import api_view
-# from rest_framework.response import Response
-# from django.http import JsonResponse
-# from django.contrib.auth.models import User
-# from .serializers import UserSerializer
-
-# class UserViewSet(viewsets.ModelViewSet):
-#     """
-#     ViewSet for managing User objects.
-    
-#     Provides CRUD operations for users.
-#     Regular users can only see and modify their own user,
-#     while staff users can access all users.
-#     """
-#     serializer_class = UserSerializer
-    
-#     def get_queryset(self):
-#         """
-#         Returns users filtered by permissions.
-        
-#         Staff users see all users, while regular users only see themselves.
-        
-#         Returns:
-#             QuerySet: User objects based on permission,
-#             or an empty QuerySet if not authenticated.
-#         """
-#         user = self.request.user
-#         if user.is_authenticated:
-#             if user.is_staff:
-#                 return User.objects.all()
-#             return User.objects.filter(id=user.id)
-#         return User.objects.none()
-    
-#     def get_serializer(self, *args, **kwargs):
-#         """
-#         Handle both single item and list serialization.
-        
-#         Args:
-#             *args: Variable length argument list.
-#             **kwargs: Arbitrary keyword arguments.
-            
-#         Returns:
-#             Serializer: The appropriate serializer instance.
-#         """
-#         if isinstance(kwargs.get('data', {}), list):
-#             kwargs['many'] = True
-#         return super().get_serializer(*args, **kwargs)
-    
-#     def list(self, request):
-#         """
-#         Lists users based on permissions.
-        
-#         Args:
-#             request: The HTTP request.
-            
-#         Returns:
-#             Response: Serialized users data.
-#         """
-#         users = self.get_queryset()
-#         serializer = self.get_serializer(users, many=True)
-#         return Response(serializer.data)
-    
-#     def create(self, request):
-#         """
-#         Creates a new user.
-        
-#         This is primarily for admin functionality.
-#         Regular user registration should normally use a dedicated registration view.
-        
-#         Args:
-#             request: The HTTP request containing user data.
-            
-#         Returns:
-#             Response: Success message if created, or validation errors.
-#         """
-#         serializer = self.get_serializer(data=request.data)
-        
-#         if serializer.is_valid():
-#             serializer.save()
-#             return Response({"status": "success"}, status=status.HTTP_201_CREATED)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-# @api_view(['GET'])
-# def hello_world(request):
-#     """
-#     A simple API view that returns a hello message.
-    
-#     Args:
-#         request: The HTTP request.
-        
-#     Returns:
-#         Response: A JSON response with a "Hello World!" message.
-#     """
-#     return Response({"message": "Hello World!"})
-
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.db.models import Q, Count
@@ -103,10 +7,12 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 
-from Coderr_app.models import Offer, OfferDetail, Feature, Order, Review, BaseInfo
+from Coderr_app.models import Offer, OfferDetail, Feature, Order, Review, BaseInfo, BusinessProfile, CustomerProfile
 from .serializers import (
     OfferSerializer, OfferWithDetailsSerializer, OfferDetailSerializer, 
-    ReviewSerializer, OrderSerializer, BaseInfoSerializer
+    ReviewSerializer, OrderSerializer, BaseInfoSerializer,
+    BusinessProfileSerializer, CustomerProfileSerializer, 
+    BusinessProfileUpdateSerializer, CustomerProfileUpdateSerializer
 )
 
 
@@ -135,18 +41,14 @@ class OfferViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         queryset = super().get_queryset()
-        
-        # Filter by creator_id if provided
         creator_id = self.request.query_params.get('creator_id')
         if creator_id:
             queryset = queryset.filter(creator_id=creator_id)
-        
-        # Filter by max_delivery_time if provided
+
         max_delivery_time = self.request.query_params.get('max_delivery_time')
         if max_delivery_time:
             try:
                 max_days = int(max_delivery_time)
-                # Find offers with at least one detail that has delivery time <= max_days
                 queryset = queryset.filter(details__delivery_time_in_days__lte=max_days).distinct()
             except ValueError:
                 pass
@@ -170,8 +72,6 @@ class OfferDetailViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         offer_detail = serializer.save()
-        
-        # Create features from the features list
         features_data = self.request.data.get('features', [])
         for feature_description in features_data:
             Feature.objects.create(
@@ -181,14 +81,9 @@ class OfferDetailViewSet(viewsets.ModelViewSet):
     
     def perform_update(self, serializer):
         offer_detail = serializer.save()
-        
-        # Update features if provided
         features_data = self.request.data.get('features')
         if features_data is not None:
-            # Delete existing features
             offer_detail.features.all().delete()
-            
-            # Create new features
             for feature_description in features_data:
                 Feature.objects.create(
                     offer_detail=offer_detail,
@@ -204,17 +99,15 @@ class OrderViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        
-        # If user is a business, show orders for their offers
-        # If user is a customer, show their orders
-        profile_type = getattr(user, 'profile', None)
-        if profile_type:
-            if user.profile.type == 'business':
-                return Order.objects.filter(business_user=user)
-            else:
+        try:
+            business_profile = BusinessProfile.objects.get(user=user)
+            return Order.objects.filter(business_user=user)
+        except BusinessProfile.DoesNotExist:
+            try:
+                customer_profile = CustomerProfile.objects.get(user=user)
                 return Order.objects.filter(customer=user)
-        
-        return Order.objects.none()
+            except CustomerProfile.DoesNotExist:
+                return Order.objects.none()
     
     def perform_create(self, serializer):
         offer_detail_id = self.request.data.get('offer_detail_id')
@@ -223,10 +116,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                 {'error': 'offer_detail_id is required'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
         offer_detail = get_object_or_404(OfferDetail, id=offer_detail_id)
         business_user = offer_detail.offer.creator
-        
         serializer.save(
             customer=self.request.user,
             business_user=business_user,
@@ -236,8 +127,6 @@ class OrderViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         old_status = serializer.instance.status
         instance = serializer.save()
-        
-        # Check if status changed to completed
         if old_status != 'completed' and instance.status == 'completed':
             BaseInfo.update_stats()
     
@@ -248,7 +137,6 @@ class OrderViewSet(viewsets.ModelViewSet):
             business_user_id=user_id,
             status='in_progress'
         ).count()
-        
         return Response({'order_count': count})
     
     @action(detail=False, methods=['GET'], url_path='completed-order-count/(?P<user_id>[^/.]+)')
@@ -258,7 +146,6 @@ class OrderViewSet(viewsets.ModelViewSet):
             business_user_id=user_id,
             status='completed'
         ).count()
-        
         return Response({'completed_order_count': count})
 
 
@@ -278,3 +165,122 @@ class ReviewViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         super().perform_destroy(instance)
         BaseInfo.update_stats()
+
+
+class BusinessProfileViewSet(viewsets.ModelViewSet):
+    queryset = BusinessProfile.objects.all()
+    serializer_class = BusinessProfileSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_serializer_class(self):
+        if self.action in ['update', 'partial_update']:
+            return BusinessProfileUpdateSerializer
+        return BusinessProfileSerializer
+    
+    @action(detail=True, methods=['GET', 'PATCH'], url_path='by-user')
+    def get_by_user_id(self, request, pk=None):
+        profile = get_object_or_404(BusinessProfile, user_id=pk)
+        
+        if request.method == 'GET':
+            serializer = self.get_serializer(profile)
+            return Response(serializer.data)
+        
+        elif request.method == 'PATCH':
+            serializer = BusinessProfileUpdateSerializer(profile, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CustomerProfileViewSet(viewsets.ModelViewSet):
+    queryset = CustomerProfile.objects.all()
+    serializer_class = CustomerProfileSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_serializer_class(self):
+        if self.action in ['update', 'partial_update']:
+            return CustomerProfileUpdateSerializer
+        return CustomerProfileSerializer
+    
+    @action(detail=True, methods=['GET', 'PATCH'], url_path='by-user')
+    def get_by_user_id(self, request, pk=None):
+        profile = get_object_or_404(CustomerProfile, user_id=pk)
+        
+        if request.method == 'GET':
+            serializer = self.get_serializer(profile)
+            return Response(serializer.data)
+        
+        elif request.method == 'PATCH':
+            serializer = CustomerProfileUpdateSerializer(profile, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ProfileCompatibilityViewSet(viewsets.ViewSet):
+    """
+    ViewSet für abwärtskompatible Profil-API-Endpunkte.
+    """
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def retrieve(self, request, pk=None):
+        """
+        GET /profile/{id}/ - Gibt das passende Profil zurück (Business oder Customer)
+        """
+        user = get_object_or_404(User, pk=pk)
+        
+        try:
+            profile = BusinessProfile.objects.get(user=user)
+            serializer = BusinessProfileSerializer(profile)
+            return Response(serializer.data)
+        except BusinessProfile.DoesNotExist:
+            try:
+                profile = CustomerProfile.objects.get(user=user)
+                serializer = CustomerProfileSerializer(profile)
+                return Response(serializer.data)
+            except CustomerProfile.DoesNotExist:
+                return Response({"detail": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
+    
+    def partial_update(self, request, pk=None):
+        """
+        PATCH /profile/{id}/ - Aktualisiert das passende Profil
+        """
+        user = get_object_or_404(User, pk=pk)
+        
+        try:
+            profile = BusinessProfile.objects.get(user=user)
+            serializer = BusinessProfileUpdateSerializer(profile, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except BusinessProfile.DoesNotExist:
+            try:
+                profile = CustomerProfile.objects.get(user=user)
+                serializer = CustomerProfileUpdateSerializer(profile, data=request.data, partial=True)
+                if serializer.is_valid():
+                    serializer.save()
+                    return Response(serializer.data)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            except CustomerProfile.DoesNotExist:
+                return Response({"detail": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
+    
+    @action(detail=False, methods=['GET'])
+    def business(self, request):
+        """
+        GET /profiles/business/ - Gibt alle Business-Profile zurück
+        """
+        profiles = BusinessProfile.objects.all()
+        serializer = BusinessProfileSerializer(profiles, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['GET'])
+    def customer(self, request):
+        """
+        GET /profiles/customer/ - Gibt alle Customer-Profile zurück
+        """
+        profiles = CustomerProfile.objects.all()
+        serializer = CustomerProfileSerializer(profiles, many=True)
+        return Response(serializer.data)

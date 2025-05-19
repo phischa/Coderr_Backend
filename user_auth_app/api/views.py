@@ -40,15 +40,24 @@ def login_view(request):
 
 @api_view(['POST'])
 def registration_view(request):
-    """Handle user registration"""
     serializer = RegistrationSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
         token, _ = Token.objects.get_or_create(user=user)
+        profile_type = serializer.validated_data.get('type')
+        
+        if profile_type == 'business':
+            from Coderr_app.models import BusinessProfile
+            BusinessProfile.objects.create(user=user)
+        else:
+            from Coderr_app.models import CustomerProfile
+            CustomerProfile.objects.create(user=user)
+        
         return Response({
             'token': token.key,
             'user_id': user.id,
-            'username': user.username
+            'username': user.username,
+            'type': profile_type  
         })
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

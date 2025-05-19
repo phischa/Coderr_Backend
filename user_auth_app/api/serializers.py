@@ -61,26 +61,25 @@ class RegistrationSerializer(serializers.ModelSerializer):
     Includes profile type selection.
     """
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
-    confirm_password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    repeated_password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
     type = serializers.ChoiceField(choices=Profile.USER_TYPES, required=True)
     first_name = serializers.CharField(required=False)
     last_name = serializers.CharField(required=False)
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'password', 'confirm_password', 'type', 'first_name', 'last_name']
-    
+        fields = ['username', 'email', 'password', 'repeated_password', 'type', 'first_name', 'last_name']
+
     def validate(self, data):
-        email = self.validated_data['email']
-        if data['password'] != data['confirm_password']:
+        if data['password'] != data['repeated_password']:
             raise serializers.ValidationError("Passwords do not match.")
-        if User.objects.filter(email=email).exists():
+        if User.objects.filter(email=data['email']).exists():
             raise serializers.ValidationError({'email': 'Email already exists'})
         return data
     
     def create(self, validated_data):
         user_type = validated_data.pop('type')
-        validated_data.pop('confirm_password')
+        validated_data.pop('repeated_password')
         
         first_name = validated_data.pop('first_name', '')
         last_name = validated_data.pop('last_name', '')

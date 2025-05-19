@@ -63,6 +63,22 @@ class ProfileViewSet(viewsets.ModelViewSet):
         if self.action in ['update', 'partial_update']:
             return ProfileUpdateSerializer
         return ProfileSerializer
+
+    @action(detail=True, methods=['GET', 'PATCH'], url_path='by-user')
+    def get_by_user_id(self, request, pk=None):
+        """Get profile by user ID instead of profile ID"""
+        profile = get_object_or_404(Profile, user_id=pk)
+    
+        if request.method == 'GET':
+            serializer = self.get_serializer(profile)
+            return Response(serializer.data)
+    
+        elif request.method == 'PATCH':
+            serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=False, methods=['GET'], url_path='business')
     def business_profiles(self, request):

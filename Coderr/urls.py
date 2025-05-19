@@ -19,13 +19,14 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from Coderr_app.api import urls as coderr_app_urls
+from user_auth_app.api import urls as user_auth_urls
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include(coderr_app_urls)),
     path('api-auth/', include('rest_framework.urls')),
-    path('api/', include('Coderr_app.api.urls')),
-    path('api/auth/', include('user_auth_app.api.urls')),  # User Auth App URLs
+    path('api/', include(coderr_app_urls)),
+    path('api/auth/', include(user_auth_urls)),
 ]
 
 # Serve media files in development

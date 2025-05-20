@@ -1,6 +1,6 @@
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Avg
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
@@ -29,7 +29,7 @@ def base_info_view(request):
     business_profile_count = BusinessProfile.objects.count()
     avg_rating = Review.objects.aggregate(Avg('rating'))
     average_rating = round(avg_rating['rating__avg'], 1) if avg_rating['rating__avg'] is not None else 0
-    
+
     formatted_data = {
         'offer_count': info.total_offers,
         'review_count': info.total_reviews,

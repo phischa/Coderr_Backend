@@ -177,7 +177,7 @@ class OfferWithDetailsSerializer(serializers.ModelSerializer):
     details = OfferDetailWithFeaturesSerializer(many=True, read_only=True)
     min_price = serializers.ReadOnlyField()
     min_delivery_time = serializers.ReadOnlyField()
-    user = serializers.ReadOnlyField()
+    user = serializers.ReadOnlyField(source='creator.id')
     
     class Meta:
         model = Offer

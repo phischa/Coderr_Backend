@@ -15,13 +15,29 @@ from .serializers import (
     BusinessProfileUpdateSerializer, CustomerProfileUpdateSerializer
 )
 
-
 @api_view(['GET'])
 def base_info_view(request):
-    """Return site statistics"""
+    """Return site statistics matching the frontend element IDs"""
     info = BaseInfo.get_or_create_singleton()
-    serializer = BaseInfoSerializer(info)
-    return Response(serializer.data)
+    base_data = {
+        'total_users': info.total_users,
+        'total_offers': info.total_offers,
+        'total_completed_orders': info.total_completed_orders,
+        'total_reviews': info.total_reviews
+    }
+
+    business_profile_count = BusinessProfile.objects.count()
+    avg_rating = Review.objects.aggregate(Avg('rating'))
+    average_rating = round(avg_rating['rating__avg'], 1) if avg_rating['rating__avg'] is not None else 0
+    
+    formatted_data = {
+        'offer_count': info.total_offers,
+        'review_count': info.total_reviews,
+        'business_profile_count': business_profile_count,
+        'average_rating': average_rating
+    }
+    
+    return Response(formatted_data)
 
 
 class OfferViewSet(viewsets.ModelViewSet):
@@ -96,6 +112,7 @@ class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None 
     
     def get_queryset(self):
         user = self.request.user
@@ -154,6 +171,7 @@ class ReviewViewSet(viewsets.ModelViewSet):
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+    pagination_class = None
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['reviewer', 'business_user']
     ordering_fields = ['created_at', 'updated_at', 'rating']

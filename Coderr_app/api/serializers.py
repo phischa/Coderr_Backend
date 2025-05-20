@@ -150,10 +150,10 @@ class OfferSerializer(serializers.ModelSerializer):
     """
     Serializer for Offer model.
     """
+    user = serializers.ReadOnlyField(source='creator.id')
     details = serializers.SerializerMethodField()
     min_price = serializers.ReadOnlyField()
     min_delivery_time = serializers.ReadOnlyField()
-    user = serializers.ReadOnlyField()
     
     class Meta:
         model = Offer

@@ -18,7 +18,15 @@ from .serializers import (
 
 @api_view(['POST'])
 def login_view(request):
-    """Handle user login and return auth token"""
+    """
+    Handle user login and return auth token.
+    
+    Args:
+        request: Contains username/email and password
+        
+    Returns:
+        Response with token and user info or error message
+    """
     serializer = LoginSerializer(data=request.data)
     if serializer.is_valid():
         username = serializer.validated_data['username']
@@ -30,7 +38,8 @@ def login_view(request):
             return Response({
                 'token': token.key,
                 'user_id': user.id,
-                'username': user.username
+                'username': user.username,
+                'type': user.profile.type
             })
         
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
@@ -40,18 +49,26 @@ def login_view(request):
 
 @api_view(['POST'])
 def registration_view(request):
+    """
+    Handle user registration.
+    Creates the user, profile, and returns the auth token.
+    
+    Args:
+        request: Contains user registration data including type
+        
+    Returns:
+        Response with token and user info or error message
+    """
     serializer = RegistrationSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
         token, _ = Token.objects.get_or_create(user=user)
         profile_type = serializer.validated_data.get('type')
         
-        if profile_type == 'business':
-            from Coderr_app.models import BusinessProfile
-            BusinessProfile.objects.create(user=user)
-        else:
-            from Coderr_app.models import CustomerProfile
-            CustomerProfile.objects.create(user=user)
+        # Profile is created by signals, we just update the type
+        profile = user.profile
+        profile.type = profile_type
+        profile.save()
         
         return Response({
             'token': token.key,
@@ -62,8 +79,12 @@ def registration_view(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 class ProfileViewSet(viewsets.ModelViewSet):
-    """API endpoint for user profiles"""
+    """
+    API endpoint for user profiles.
+    Provides CRUD operations for user profiles.
+    """
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -75,7 +96,16 @@ class ProfileViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['GET', 'PATCH'], url_path='by-user')
     def get_by_user_id(self, request, pk=None):
-        """Get profile by user ID instead of profile ID"""
+        """
+        Get profile by user ID instead of profile ID.
+        
+        Args:
+            request: HTTP request
+            pk: User ID
+            
+        Returns:
+            Profile data for the specified user
+        """
         profile = get_object_or_404(Profile, user_id=pk)
     
         if request.method == 'GET':
@@ -91,17 +121,34 @@ class ProfileViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['GET'], url_path='business')
     def business_profiles(self, request):
-        """List all business profiles"""
+        """
+        List all business profiles.
+        
+        Args:
+            request: HTTP request
+            
+        Returns:
+            List of business profiles
+        """
         profiles = Profile.objects.filter(type='business')
         serializer = self.get_serializer(profiles, many=True)
         return Response(serializer.data)
     
     @action(detail=False, methods=['GET'], url_path='customer')
     def customer_profiles(self, request):
-        """List all customer profiles"""
+        """
+        List all customer profiles.
+        
+        Args:
+            request: HTTP request
+            
+        Returns:
+            List of customer profiles
+        """
         profiles = Profile.objects.filter(type='customer')
         serializer = self.get_serializer(profiles, many=True)
         return Response(serializer.data)
+
 
 class GuestLoginView(APIView):
     """
@@ -146,5 +193,6 @@ class GuestLoginView(APIView):
             'token': token.key,
             'user_id': guest_user.id,
             'username': guest_username,
-            'is_guest': True
+            'is_guest': True,
+            'type': 'customer'
         })

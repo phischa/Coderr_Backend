@@ -7,26 +7,40 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 
-from Coderr_app.models import Offer, OfferDetail, Feature, Order, Review, BaseInfo, BusinessProfile, CustomerProfile
+from user_auth_app.models import Profile
+from Coderr_app.models import (
+    Offer, OfferDetail, Feature, Order, Review, BaseInfo
+)
 from .serializers import (
     OfferSerializer, OfferWithDetailsSerializer, OfferDetailSerializer, 
     ReviewSerializer, OrderSerializer, BaseInfoSerializer,
-    BusinessProfileSerializer, CustomerProfileSerializer, 
-    BusinessProfileUpdateSerializer, CustomerProfileUpdateSerializer
+    ProfileSerializer, ProfileUpdateSerializer
 )
+
+class IsBusinessUser(BasePermission):
+    """
+    Custom permission to only allow business users to access a view.
+    """
+    def has_permission(self, request, view):
+        return (request.user.is_authenticated and 
+                hasattr(request.user, 'profile') and 
+                request.user.profile.type == 'business')
+
+class IsCustomerUser(BasePermission):
+    """
+    Custom permission to only allow customer users to access a view.
+    """
+    def has_permission(self, request, view):
+        return (request.user.is_authenticated and 
+                hasattr(request.user, 'profile') and 
+                request.user.profile.type == 'customer')
 
 @api_view(['GET'])
 def base_info_view(request):
     """Return site statistics matching the frontend element IDs"""
     info = BaseInfo.get_or_create_singleton()
-    base_data = {
-        'total_users': info.total_users,
-        'total_offers': info.total_offers,
-        'total_completed_orders': info.total_completed_orders,
-        'total_reviews': info.total_reviews
-    }
-
-    business_profile_count = BusinessProfile.objects.count()
+    
+    business_profile_count = Profile.objects.filter(type='business').count()
     avg_rating = Review.objects.aggregate(Avg('rating'))
     average_rating = round(avg_rating['rating__avg'], 1) if avg_rating['rating__avg'] is not None else 0
 
@@ -72,6 +86,10 @@ class OfferViewSet(viewsets.ModelViewSet):
         return queryset
     
     def perform_create(self, serializer):
+        # Check if user is a business user
+        if self.request.user.profile.type != 'business':
+            raise PermissionDenied("Only business users can create offers")
+        
         serializer.save(creator=self.request.user)
         BaseInfo.update_stats()
     
@@ -87,6 +105,13 @@ class OfferDetailViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
     
     def perform_create(self, serializer):
+        # Check if the offer belongs to the user
+        offer_id = self.request.data.get('offer')
+        offer = get_object_or_404(Offer, id=offer_id)
+        
+        if offer.creator != self.request.user:
+            raise PermissionDenied("You can only add details to your own offers")
+            
         offer_detail = serializer.save()
         features_data = self.request.data.get('features', [])
         for feature_description in features_data:
@@ -116,17 +141,18 @@ class OrderViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        try:
-            business_profile = BusinessProfile.objects.get(user=user)
+        profile_type = user.profile.type
+        
+        if profile_type == 'business':
             return Order.objects.filter(business_user=user)
-        except BusinessProfile.DoesNotExist:
-            try:
-                customer_profile = CustomerProfile.objects.get(user=user)
-                return Order.objects.filter(customer=user)
-            except CustomerProfile.DoesNotExist:
-                return Order.objects.none()
+        else:  # 'customer'
+            return Order.objects.filter(customer=user)
     
     def perform_create(self, serializer):
+        # Check if user is a customer
+        if self.request.user.profile.type != 'customer':
+            raise PermissionDenied("Only customers can create orders")
+            
         offer_detail_id = self.request.data.get('offer_detail_id')
         if not offer_detail_id:
             return Response(
@@ -177,6 +203,10 @@ class ReviewViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at', 'rating']
     
     def perform_create(self, serializer):
+        # Check if user is a customer
+        if self.request.user.profile.type != 'customer':
+            raise PermissionDenied("Only customers can submit reviews")
+            
         serializer.save(reviewer=self.request.user)
         BaseInfo.update_stats()
     
@@ -185,120 +215,53 @@ class ReviewViewSet(viewsets.ModelViewSet):
         BaseInfo.update_stats()
 
 
-class BusinessProfileViewSet(viewsets.ModelViewSet):
-    queryset = BusinessProfile.objects.all()
-    serializer_class = BusinessProfileSerializer
+class ProfileViewSet(viewsets.ModelViewSet):
+    """API endpoint for user profiles"""
+    queryset = Profile.objects.all()
+    serializer_class = ProfileSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['type']
+    search_fields = ['user__username', 'user__first_name', 'user__last_name', 'location']
     
     def get_serializer_class(self):
         if self.action in ['update', 'partial_update']:
-            return BusinessProfileUpdateSerializer
-        return BusinessProfileSerializer
-    
+            return ProfileUpdateSerializer
+        return ProfileSerializer
+        
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user_type = self.request.query_params.get('type')
+        if user_type:
+            queryset = queryset.filter(type=user_type)
+        return queryset
+
     @action(detail=True, methods=['GET', 'PATCH'], url_path='by-user')
     def get_by_user_id(self, request, pk=None):
-        profile = get_object_or_404(BusinessProfile, user_id=pk)
-        
+        """Get profile by user ID instead of profile ID"""
+        profile = get_object_or_404(Profile, user_id=pk)
+    
         if request.method == 'GET':
             serializer = self.get_serializer(profile)
             return Response(serializer.data)
-        
+    
         elif request.method == 'PATCH':
-            serializer = BusinessProfileUpdateSerializer(profile, data=request.data, partial=True)
+            serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class CustomerProfileViewSet(viewsets.ModelViewSet):
-    queryset = CustomerProfile.objects.all()
-    serializer_class = CustomerProfileSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    
-    def get_serializer_class(self):
-        if self.action in ['update', 'partial_update']:
-            return CustomerProfileUpdateSerializer
-        return CustomerProfileSerializer
-    
-    @action(detail=True, methods=['GET', 'PATCH'], url_path='by-user')
-    def get_by_user_id(self, request, pk=None):
-        profile = get_object_or_404(CustomerProfile, user_id=pk)
-        
-        if request.method == 'GET':
-            serializer = self.get_serializer(profile)
-            return Response(serializer.data)
-        
-        elif request.method == 'PATCH':
-            serializer = CustomerProfileUpdateSerializer(profile, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class ProfileCompatibilityViewSet(viewsets.ViewSet):
-    """
-    ViewSet für abwärtskompatible Profil-API-Endpunkte.
-    """
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    
-    def retrieve(self, request, pk=None):
-        """
-        GET /profile/{id}/ - Gibt das passende Profil zurück (Business oder Customer)
-        """
-        user = get_object_or_404(User, pk=pk)
-        
-        try:
-            profile = BusinessProfile.objects.get(user=user)
-            serializer = BusinessProfileSerializer(profile)
-            return Response(serializer.data)
-        except BusinessProfile.DoesNotExist:
-            try:
-                profile = CustomerProfile.objects.get(user=user)
-                serializer = CustomerProfileSerializer(profile)
-                return Response(serializer.data)
-            except CustomerProfile.DoesNotExist:
-                return Response({"detail": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
-    
-    def partial_update(self, request, pk=None):
-        """
-        PATCH /profile/{id}/ - Aktualisiert das passende Profil
-        """
-        user = get_object_or_404(User, pk=pk)
-        
-        try:
-            profile = BusinessProfile.objects.get(user=user)
-            serializer = BusinessProfileUpdateSerializer(profile, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except BusinessProfile.DoesNotExist:
-            try:
-                profile = CustomerProfile.objects.get(user=user)
-                serializer = CustomerProfileUpdateSerializer(profile, data=request.data, partial=True)
-                if serializer.is_valid():
-                    serializer.save()
-                    return Response(serializer.data)
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            except CustomerProfile.DoesNotExist:
-                return Response({"detail": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
     
     @action(detail=False, methods=['GET'])
     def business(self, request):
-        """
-        GET /profiles/business/ - Gibt alle Business-Profile zurück
-        """
-        profiles = BusinessProfile.objects.all()
-        serializer = BusinessProfileSerializer(profiles, many=True)
+        """List all business profiles"""
+        profiles = Profile.objects.filter(type='business')
+        serializer = self.get_serializer(profiles, many=True)
         return Response(serializer.data)
     
     @action(detail=False, methods=['GET'])
     def customer(self, request):
-        """
-        GET /profiles/customer/ - Gibt alle Customer-Profile zurück
-        """
-        profiles = CustomerProfile.objects.all()
-        serializer = CustomerProfileSerializer(profiles, many=True)
+        """List all customer profiles"""
+        profiles = Profile.objects.filter(type='customer')
+        serializer = self.get_serializer(profiles, many=True)
         return Response(serializer.data)

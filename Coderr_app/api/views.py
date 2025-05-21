@@ -4,7 +4,7 @@ from django.db.models import Q, Count, Avg
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny, BasePermission
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 
 from user_auth_app.models import Profile
@@ -16,24 +16,8 @@ from .serializers import (
     ReviewSerializer, OrderSerializer, BaseInfoSerializer,
     ProfileSerializer, ProfileUpdateSerializer
 )
+from .permissions import IsBusinessUser, IsCustomerUser
 
-class IsBusinessUser(BasePermission):
-    """
-    Custom permission to only allow business users to access a view.
-    """
-    def has_permission(self, request, view):
-        return (request.user.is_authenticated and 
-                hasattr(request.user, 'profile') and 
-                request.user.profile.type == 'business')
-
-class IsCustomerUser(BasePermission):
-    """
-    Custom permission to only allow customer users to access a view.
-    """
-    def has_permission(self, request, view):
-        return (request.user.is_authenticated and 
-                hasattr(request.user, 'profile') and 
-                request.user.profile.type == 'customer')
 
 @api_view(['GET'])
 def base_info_view(request):

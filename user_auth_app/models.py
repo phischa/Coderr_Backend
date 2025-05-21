@@ -1,15 +1,20 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 class Profile(models.Model):
     """
     Extension of the User model with additional profile information.
     Two types of profiles: business and customer.
+    
+    This is the central profile model that stores all user-related information
+    beyond the basic User model fields.
     """
-    USER_TYPES = {
-        ('businuss', 'Business'),
-        ('customer', 'Custome'),
-    }
+    USER_TYPES = [  
+        ('business', 'Business'), 
+        ('customer', 'Customer'), 
+    ]
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     file = models.ImageField(upload_to='profile-images/', null=True, blank=True)
     location = models.CharField(max_length=255, blank=True)
@@ -44,3 +49,28 @@ class Profile(models.Model):
             str: Username followed by user type (Business or Customer)
         """
         return f"{self.user.username} ({self.type})"
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    """
+    Signal handler to create a Profile whenever a User is created.
+    
+    Args:
+        sender: The model class that sent the signal (User)
+        instance: The actual User instance being saved
+        created: Boolean indicating if this is a new record
+    """
+    if created:
+        # Default to customer type for new profiles
+        Profile.objects.create(user=instance, type='customer')
+
+@receiver(post_save, sender=User)
+def save_user_profile(sender, instance, **kwargs):
+    """
+    Signal handler to save a Profile whenever a User is saved.
+    
+    Args:
+        sender: The model class that sent the signal (User)
+        instance: The actual User instance being saved
+    """
+    instance.profile.save()

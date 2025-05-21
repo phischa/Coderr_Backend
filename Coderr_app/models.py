@@ -2,56 +2,6 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator
 
-class BaseProfile(models.Model):
-    """
-    Abstrakte Basisklasse für alle Profiltypen.
-    """
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
-    file = models.ImageField(upload_to='profile_images/', null=True, blank=True)
-    location = models.CharField(max_length=255, blank=True)
-    tel = models.CharField(max_length=20, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    is_guest = models.BooleanField(default=False)
-    
-    class Meta:
-        abstract = True
-        
-    @property
-    def username(self):
-        return self.user.username
-    
-    @property
-    def first_name(self):
-        return self.user.first_name
-    
-    @property
-    def last_name(self):
-        return self.user.last_name
-    
-    @property
-    def email(self):
-        return self.user.email
-
-class BusinessProfile(BaseProfile):
-    """
-    Profil für Business-Benutzer.
-    """
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='business_profile')
-    description = models.TextField(blank=True)
-    working_hours = models.CharField(max_length=255, blank=True)
-    
-    def __str__(self):
-        return f"Business: {self.user.username}"
-
-class CustomerProfile(BaseProfile):
-    """
-    Profil für Kunden-Benutzer.
-    """
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='customer_profile')
-    
-    def __str__(self):
-        return f"Customer: {self.user.username}"
-
 class Offer(models.Model):
     """
     Service offers created by business users.
@@ -228,4 +178,3 @@ class BaseInfo(models.Model):
         obj.total_reviews = Review.objects.count()
         obj.save()
         return obj
-    

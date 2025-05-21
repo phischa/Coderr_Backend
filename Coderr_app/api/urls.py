@@ -4,12 +4,12 @@ from . import views
 
 router = DefaultRouter()
 # router.register(r'users', UserViewSet, basename='user') 
-router.register(r'offers', views.OfferViewSet)
-router.register(r'offerdetails', views.OfferDetailViewSet)
-router.register(r'orders', views.OrderViewSet)
-router.register(r'reviews', views.ReviewViewSet)
-router.register(r'business-profiles', views.BusinessProfileViewSet)
-router.register(r'customer-profiles', views.CustomerProfileViewSet)
+router.register(r'offers', views.OfferViewSet, basename='offer')
+router.register(r'offerdetails', views.OfferDetailViewSet, basename='offer-detail')
+router.register(r'orders', views.OrderViewSet, basename='order')
+router.register(r'reviews', views.ReviewViewSet, basename='review')
+router.register(r'business-profiles', views.BusinessProfileViewSet, basename='business-profile')
+router.register(r'customer-profiles', views.CustomerProfileViewSet, basename='customer-profile')
 router.register(r'profile', views.ProfileCompatibilityViewSet, basename='profile-compat')
 
 urlpatterns = [

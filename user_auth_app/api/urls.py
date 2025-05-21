@@ -4,7 +4,7 @@ from . import views
 
 # Create a router for our viewsets
 router = DefaultRouter()
-router.register(r'profiles', views.ProfileViewSet)
+router.register(r'profiles', views.ProfileViewSet, basename='profile')
 
 urlpatterns = [
     path('login/', views.login_view, name='login'),

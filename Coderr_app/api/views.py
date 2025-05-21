@@ -4,7 +4,7 @@ from django.db.models import Q, Count, Avg
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny, BasePermission
 from django_filters.rest_framework import DjangoFilterBackend
 
 from user_auth_app.models import Profile

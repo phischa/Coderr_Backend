@@ -13,6 +13,9 @@ class Offer(models.Model):
     image = models.ImageField(upload_to='offer_images/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
     
     @property
     def min_price(self):
@@ -58,6 +61,7 @@ class OfferDetail(models.Model):
     
     class Meta:
         unique_together = ['offer', 'offer_type']
+        ordering = ['offer_type']
     
     def __str__(self):
         return f"{self.offer.title} - {self.offer_type}"

@@ -61,7 +61,7 @@ class OfferDetail(models.Model):
     
     class Meta:
         unique_together = ['offer', 'offer_type']
-        ordering = ['offer_type']
+        ordering = ['offer_type', '-created_at']
     
     def __str__(self):
         return f"{self.offer.title} - {self.offer_type}"

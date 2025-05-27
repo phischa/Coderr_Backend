@@ -1,3 +1,4 @@
+import traceback
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.db.models import Q, Count, Avg
@@ -69,14 +70,50 @@ class OfferViewSet(viewsets.ModelViewSet):
                 pass
         
         return queryset
-    
+
     def perform_create(self, serializer):
-        # Check if user is a business user
-        if self.request.user.profile.type != 'business':
-            raise PermissionDenied("Only business users can create offers")
-        
-        serializer.save(creator=self.request.user)
+        if not self.request.user.is_authenticated:
+            raise PermissionDenied("Authentication required")
+
+        try:
+            user_profile = self.request.user.profile
+            if user_profile.type != 'business':
+                raise PermissionDenied("Only business users can create offers")
+        except Profile.DoesNotExist:
+            raise PermissionDenied("User profile not found")
+    
+        offer = serializer.save(creator=self.request.user)
+        self.create_offer_details_from_request(offer, self.request.data)
+    
         BaseInfo.update_stats()
+
+    def create_offer_details_from_request(self, offer, request_data):
+        """Create offer details from the frontend form data"""
+
+        details = request_data.get('details', [])
+    
+        for detail_data in details:
+            try:
+                detail = OfferDetail.objects.create(
+                    offer=offer,
+                    offer_type=detail_data.get('offer_type', 'basic'),
+                    title=detail_data.get('title', f"{offer.title} - {detail_data.get('offer_type', 'basic').capitalize()}"),
+                    price=float(detail_data.get('price', 0)),
+                    delivery_time_in_days=int(detail_data.get('delivery_time_in_days', 1)),
+                    revisions=int(detail_data.get('revisions', 1)) if detail_data.get('revisions', 1) != -1 else -1
+                )
+                features_list = detail_data.get('features', [])
+                created_features = []
+                for feature_description in features_list:
+                    if feature_description.strip():
+                        feature = Feature.objects.create(
+                            offer_detail=detail,
+                            description=feature_description.strip()
+                        )
+                        created_features.append(feature_description)
+            
+            except Exception as e:
+                traceback.print_exc()
     
     def perform_destroy(self, instance):
         super().perform_destroy(instance)

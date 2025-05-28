@@ -164,11 +164,20 @@ class OrderSerializer(serializers.ModelSerializer):
     """
     Serializer for Order model.
     Accepts offer_detail_id to match frontend expectations.
+    Includes all necessary fields from the related OfferDetail.
     """
 
     offer_detail_id = serializers.IntegerField(write_only=True, required=False)
     customer_username = serializers.SerializerMethodField()
     business_username = serializers.SerializerMethodField()
+    
+    # Add the missing fields from the model properties
+    features = serializers.ReadOnlyField()
+    title = serializers.ReadOnlyField()
+    price = serializers.ReadOnlyField()
+    delivery_time_in_days = serializers.ReadOnlyField()
+    revisions = serializers.ReadOnlyField()
+    customer_user = serializers.ReadOnlyField()  # This returns customer.id
     
     class Meta:
         model = Order
@@ -177,12 +186,19 @@ class OrderSerializer(serializers.ModelSerializer):
             'offer_detail_id',      
             'offer_detail',         
             'customer', 
+            'customer_user',        # Add this for frontend compatibility
             'business_user', 
             'customer_username',
             'business_username',
             'status', 
             'created_at', 
-            'updated_at'
+            'updated_at',
+            # Add all the property fields
+            'features',
+            'title',
+            'price',
+            'delivery_time_in_days',
+            'revisions'
         ]
         read_only_fields = ['id', 'customer', 'business_user', 'offer_detail', 'created_at', 'updated_at']
     

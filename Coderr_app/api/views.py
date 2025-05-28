@@ -89,7 +89,6 @@ class OfferViewSet(viewsets.ModelViewSet):
 
     def create_offer_details_from_request(self, offer, request_data):
         """Create offer details from the frontend form data"""
-
         details = request_data.get('details', [])
     
         for detail_data in details:
@@ -114,6 +113,34 @@ class OfferViewSet(viewsets.ModelViewSet):
             
             except Exception as e:
                 traceback.print_exc()
+
+    def perform_update(self, serializer):
+        """Update offer and its related details"""
+        offer = serializer.save()
+        details_data = self.request.data.get('details', [])
+        if details_data:
+            for detail_data in details_data:
+                detail_id = detail_data.get('id')
+                offer_type = detail_data.get('offer_type')
+                detail = OfferDetail.objects.get(id=detail_id, offer=offer)
+                detail.title = detail_data.get('title', detail.title)
+                detail.price = float(detail_data.get('price', detail.price))
+                detail.delivery_time_in_days = int(detail_data.get('delivery_time_in_days', detail.delivery_time_in_days))
+                detail.revisions = int(detail_data.get('revisions', detail.revisions)) if detail_data.get('revisions', detail.revisions) != -1 else -1
+                detail.save()
+                    
+                # Update features if provided
+                features_list = detail_data.get('features')
+                if features_list is not None:
+                    # Delete existing features
+                    detail.features.all().delete()
+                    # Create new features
+                    for feature_description in features_list:
+                        if feature_description.strip():
+                            Feature.objects.create(
+                                offer_detail=detail,
+                                description=feature_description.strip()
+                            )
     
     def perform_destroy(self, instance):
         super().perform_destroy(instance)

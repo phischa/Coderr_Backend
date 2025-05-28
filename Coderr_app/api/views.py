@@ -2,10 +2,10 @@ import traceback
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.db.models import Q, Count, Avg
-from rest_framework import viewsets, status, filters
+from rest_framework import viewsets, status, filters, serializers
 from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -163,7 +163,15 @@ class OrderViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        profile_type = user.profile.type
+        
+        # Check if user is authenticated
+        if not user.is_authenticated:
+            return Order.objects.none()
+            
+        try:
+            profile_type = user.profile.type
+        except Profile.DoesNotExist:
+            return Order.objects.none()
         
         if profile_type == 'business':
             return Order.objects.filter(business_user=user)
@@ -171,18 +179,38 @@ class OrderViewSet(viewsets.ModelViewSet):
             return Order.objects.filter(customer=user)
     
     def perform_create(self, serializer):
+        # Check if user has a profile
+        try:
+            user_profile = self.request.user.profile
+        except Profile.DoesNotExist:
+            raise PermissionDenied("User profile not found")
+            
         # Check if user is a customer
-        if self.request.user.profile.type != 'customer':
+        if user_profile.type != 'customer':
             raise PermissionDenied("Only customers can create orders")
             
-        offer_detail_id = self.request.data.get('offer_detail_id')
+        # Get offer_detail from the request data
+        # The frontend might send either 'offer_detail' or 'offer_detail_id'
+        offer_detail_id = (
+            self.request.data.get('offer_detail') or 
+            self.request.data.get('offer_detail_id')
+        )
+        
         if not offer_detail_id:
-            return Response(
-                {'error': 'offer_detail_id is required'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        offer_detail = get_object_or_404(OfferDetail, id=offer_detail_id)
+            raise ValidationError({
+                'offer_detail': 'This field is required'
+            })
+            
+        try:
+            offer_detail = OfferDetail.objects.get(id=offer_detail_id)
+        except OfferDetail.DoesNotExist:
+            raise ValidationError({
+                'offer_detail': 'Invalid offer detail ID'
+            })
+            
         business_user = offer_detail.offer.creator
+        
+        # Save the order with the required relationships
         serializer.save(
             customer=self.request.user,
             business_user=business_user,

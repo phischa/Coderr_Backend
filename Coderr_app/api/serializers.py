@@ -186,16 +186,6 @@ class OrderSerializer(serializers.ModelSerializer):
     
     def get_business_username(self, obj):
         return obj.business_user.username
-    
-    def validate(self, data):
-        """
-        Ensure either offer_detail or offer_detail_id is provided
-        """
-        if not data.get('offer_detail') and not data.get('offer_detail_id'):
-            raise serializers.ValidationError(
-                "Either 'offer_detail' or 'offer_detail_id' must be provided"
-            )
-        return data
 
 
 class BaseInfoSerializer(serializers.ModelSerializer):

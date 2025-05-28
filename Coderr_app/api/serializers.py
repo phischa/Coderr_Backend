@@ -159,33 +159,46 @@ class ReviewSerializer(serializers.ModelSerializer):
         return obj.business_user.username
 
 
+
 class OrderSerializer(serializers.ModelSerializer):
     """
     Serializer for Order model.
+    Accepts offer_detail_id to match frontend expectations.
     """
+
+    offer_detail_id = serializers.IntegerField(write_only=True, required=False)
     customer_username = serializers.SerializerMethodField()
     business_username = serializers.SerializerMethodField()
-    title = serializers.ReadOnlyField()
-    delivery_time_in_days = serializers.ReadOnlyField()
-    revisions = serializers.ReadOnlyField()
-    price = serializers.ReadOnlyField()
-    features = serializers.ReadOnlyField()
-    customer_user = serializers.ReadOnlyField()
-    offer_detail_id = serializers.IntegerField(write_only=True, required=False)
     
     class Meta:
         model = Order
-        fields = ['id', 'customer', 'business_user', 'customer_username', 'business_username',
-                    'offer_detail', 'offer_detail_id', 'status', 'created_at', 'updated_at', 
-                    'title', 'delivery_time_in_days', 'revisions', 'price', 'features',
-                    'customer_user']
-        read_only_fields = ['customer', 'business_user']
+        fields = [
+            'id', 
+            'offer_detail_id',      
+            'offer_detail',         
+            'customer', 
+            'business_user', 
+            'customer_username',
+            'business_username',
+            'status', 
+            'created_at', 
+            'updated_at'
+        ]
+        read_only_fields = ['id', 'customer', 'business_user', 'offer_detail', 'created_at', 'updated_at']
     
     def get_customer_username(self, obj):
-        return obj.customer.username
+        """Return the customer's username."""
+        return obj.customer.username if obj.customer else None
     
     def get_business_username(self, obj):
-        return obj.business_user.username
+        """Return the business user's username."""
+        return obj.business_user.username if obj.business_user else None
+    
+    def validate_offer_detail_id(self, value):
+        """Validate that the offer detail exists."""
+        if not OfferDetail.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Invalid offer detail ID")
+        return value
 
 
 class BaseInfoSerializer(serializers.ModelSerializer):

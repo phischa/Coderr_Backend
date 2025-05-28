@@ -171,19 +171,31 @@ class OrderSerializer(serializers.ModelSerializer):
     price = serializers.ReadOnlyField()
     features = serializers.ReadOnlyField()
     customer_user = serializers.ReadOnlyField()
+    offer_detail_id = serializers.IntegerField(write_only=True, required=False)
     
     class Meta:
         model = Order
         fields = ['id', 'customer', 'business_user', 'customer_username', 'business_username',
-                    'offer_detail', 'status', 'created_at', 'updated_at', 
+                    'offer_detail', 'offer_detail_id', 'status', 'created_at', 'updated_at', 
                     'title', 'delivery_time_in_days', 'revisions', 'price', 'features',
                     'customer_user']
+        read_only_fields = ['customer', 'business_user']
     
     def get_customer_username(self, obj):
         return obj.customer.username
     
     def get_business_username(self, obj):
         return obj.business_user.username
+    
+    def validate(self, data):
+        """
+        Ensure either offer_detail or offer_detail_id is provided
+        """
+        if not data.get('offer_detail') and not data.get('offer_detail_id'):
+            raise serializers.ValidationError(
+                "Either 'offer_detail' or 'offer_detail_id' must be provided"
+            )
+        return data
 
 
 class BaseInfoSerializer(serializers.ModelSerializer):

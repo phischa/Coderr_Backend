@@ -151,6 +151,7 @@ class ReviewSerializer(serializers.ModelSerializer):
         model = Review
         fields = ['id', 'reviewer', 'business_user', 'rating', 'description', 
                     'created_at', 'updated_at', 'reviewer_username', 'business_user_username']
+        read_only_fields = ['reviewer', 'created_at', 'updated_at']
     
     def get_reviewer_username(self, obj):
         return obj.reviewer.username

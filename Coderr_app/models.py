@@ -141,9 +141,7 @@ class Review(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
-        # One reviewer can only review a business user once
         unique_together = ['reviewer', 'business_user']
-        # Default ordering by updated_at descending
         ordering = ['-updated_at']
     
     def __str__(self):

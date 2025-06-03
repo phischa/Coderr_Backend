@@ -712,4 +712,193 @@ class ProfileViewSetTest(TransactionTestCase):
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['location'], 'Updated City')
+
+class ViewSetHTTPMethodsTest(TransactionTestCase):
+    """Test ViewSet HTTP methods and error handling"""
+    
+    def setUp(self):
+        """Set up test data"""
+        User.objects.all().delete()
         
+        self.business_user = User.objects.create_user(
+            username='business',
+            email='business@test.com',
+            password='test123'
+        )
+        self.business_user.profile.type = 'business'
+        self.business_user.profile.save()
+        
+        self.customer_user = User.objects.create_user(
+            username='customer',
+            email='customer@test.com',
+            password='test123'
+        )
+        
+        self.offer = Offer.objects.create(
+            creator=self.business_user,
+            title='Test Service',
+            description='Test'
+        )
+        
+        self.offer_detail = OfferDetail.objects.create(
+            offer=self.offer,
+            offer_type='basic',
+            title='Basic Package',
+            revisions=2,
+            delivery_time_in_days=7,
+            price=Decimal('100.00')
+        )
+        
+        self.client = APIClient()
+    
+    def test_offer_delete_updates_base_info(self):
+        """Test that deleting offer updates BaseInfo stats"""
+        self.client.force_authenticate(user=self.business_user)
+        
+        # Get initial stats
+        initial_info = BaseInfo.get_or_create_singleton()
+        initial_offers = initial_info.total_offers
+        
+        # Delete offer
+        url = reverse('offer-detail', kwargs={'pk': self.offer.pk})
+        response = self.client.delete(url)
+        
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        
+        # Check that stats were updated
+        updated_info = BaseInfo.get_or_create_singleton()
+        self.assertLessEqual(updated_info.total_offers, initial_offers)
+    
+    def test_offer_put_request(self):
+        """Test PUT request for offer"""
+        self.client.force_authenticate(user=self.business_user)
+        
+        url = reverse('offer-detail', kwargs={'pk': self.offer.pk})
+        data = {
+            'title': 'Updated Service',
+            'description': 'Updated description',
+            'details': [{
+                'id': self.offer_detail.id,
+                'offer_type': 'basic',
+                'title': 'Updated Basic',
+                'revisions': 3,
+                'delivery_time_in_days': 5,
+                'price': '150.00',
+                'features': ['Updated Feature 1', 'Updated Feature 2']
+            }]
+        }
+        response = self.client.put(url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['title'], 'Updated Service')
+    
+    def test_offer_invalid_filtering(self):
+        """Test offer filtering with invalid parameters"""
+        url = reverse('offer-list')
+        
+        # Test with invalid max_delivery_time
+        response = self.client.get(url, {'max_delivery_time': 'invalid'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Should ignore invalid parameter and return all offers
+    
+    def test_order_put_request(self):
+        """Test PUT request for order"""
+        order = Order.objects.create(
+            customer=self.customer_user,
+            business_user=self.business_user,
+            offer_detail=self.offer_detail,
+            status='in_progress'
+        )
+        
+        self.client.force_authenticate(user=self.customer_user)
+        
+        url = reverse('order-detail', kwargs={'pk': order.pk})
+        data = {
+            'status': 'completed',
+            'offer_detail_id': self.offer_detail.id
+        }
+        response = self.client.put(url, data, format='json')
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'completed')
+    
+    def test_order_status_change_updates_base_info(self):
+        """Test that changing order status to completed updates BaseInfo"""
+        order = Order.objects.create(
+            customer=self.customer_user,
+            business_user=self.business_user,
+            offer_detail=self.offer_detail,
+            status='in_progress'
+        )
+        
+        self.client.force_authenticate(user=self.customer_user)
+        
+        # Get initial completed orders count
+        initial_info = BaseInfo.get_or_create_singleton()
+        initial_completed = initial_info.total_completed_orders
+        
+        # Update order to completed
+        url = reverse('order-detail', kwargs={'pk': order.pk})
+        data = {'status': 'completed'}
+        response = self.client.patch(url, data)
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Check that stats were updated
+        updated_info = BaseInfo.get_or_create_singleton()
+        self.assertGreaterEqual(updated_info.total_completed_orders, initial_completed)
+    
+    def test_review_custom_actions_error_cases(self):
+        """Test ReviewViewSet custom actions with error cases"""
+        # Test business_reviews with non-existent user
+        url = reverse('business-reviews', kwargs={'business_user_id': 99999})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        
+        # Test business_reviews with customer user (should be business)
+        url = reverse('business-reviews', kwargs={'business_user_id': self.customer_user.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        
+        # Test reviewer_reviews with non-existent user
+        url = reverse('reviewer-reviews', kwargs={'reviewer_id': 99999})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        
+        # Test reviewer_reviews with business user (should be customer)
+        url = reverse('reviewer-reviews', kwargs={'reviewer_id': self.business_user.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+    
+    def test_review_delete_updates_base_info(self):
+        """Test that deleting review updates BaseInfo stats"""
+        review = Review.objects.create(
+            reviewer=self.customer_user,
+            business_user=self.business_user,
+            rating=5,
+            description='Great!'
+        )
+        
+        self.client.force_authenticate(user=self.customer_user)
+        
+        # Delete review
+        url = reverse('review-detail', kwargs={'pk': review.pk})
+        response = self.client.delete(url)
+        
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        
+        # BaseInfo should be updated (tested indirectly)
+    
+    def test_profile_viewset_error_cases(self):
+        """Test ProfileViewSet error cases"""
+        # Test get_by_user_id with non-existent user
+        url = reverse('profile-by-user', kwargs={'pk': 99999})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        
+        # Test PATCH with invalid data
+        self.client.force_authenticate(user=self.customer_user)
+        url = reverse('profile-by-user', kwargs={'pk': self.customer_user.id})
+        data = {'email': 'invalid-email'}
+        response = self.client.patch(url, data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

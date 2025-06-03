@@ -139,5 +139,10 @@ GitHub.sublime-settings
 
 # Scripts
 *.sh
+
+
+
 create_dummy_data.py
 backup.json
+htmlcov
+

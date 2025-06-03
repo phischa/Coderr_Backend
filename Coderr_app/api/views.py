@@ -269,6 +269,8 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response({'completed_order_count': count})
 
 
+# Fügen Sie diese erweiterte ReviewViewSet in Ihre views.py ein:
+
 class ReviewViewSet(viewsets.ModelViewSet):
     """API endpoint for reviews"""
     queryset = Review.objects.all()
@@ -276,8 +278,107 @@ class ReviewViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
     pagination_class = None
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['reviewer', 'business_user']
+    filterset_fields = ['reviewer', 'business_user']  # Behalten wir für Rückwärtskompatibilität
     ordering_fields = ['created_at', 'updated_at', 'rating']
+    
+    def get_queryset(self):
+        """
+        Custom queryset filtering to support both:
+        - Standard DjangoFilter: ?business_user=X&reviewer=Y
+        - Frontend convention: ?business_user_id=X&reviewer_id=Y
+        """
+        queryset = Review.objects.all()
+        
+        # Frontend-Style Parameter (mit _id Suffix)
+        business_user_id = self.request.query_params.get('business_user_id')
+        reviewer_id = self.request.query_params.get('reviewer_id')
+        
+        # Standard DjangoFilter Parameter (ohne _id Suffix) - für Rückwärtskompatibilität
+        business_user = self.request.query_params.get('business_user')
+        reviewer = self.request.query_params.get('reviewer')
+        
+        # Filter für business_user (Frontend hat Priorität)
+        if business_user_id is not None:
+            queryset = queryset.filter(business_user_id=business_user_id)
+        elif business_user is not None:
+            queryset = queryset.filter(business_user_id=business_user)
+        
+        # Filter für reviewer (Frontend hat Priorität)
+        if reviewer_id is not None:
+            queryset = queryset.filter(reviewer_id=reviewer_id)
+        elif reviewer is not None:
+            queryset = queryset.filter(reviewer_id=reviewer)
+        
+        # Sortierung anwenden
+        ordering = self.request.query_params.get('ordering')
+        if ordering:
+            queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('-updated_at')  # Standard-Sortierung
+            
+        return queryset
+    
+    @action(detail=False, methods=['GET'], url_path='business/(?P<business_user_id>[^/.]+)')
+    def business_reviews(self, request, business_user_id=None):
+        """
+        Get all reviews for a specific business user.
+        URL: /api/reviews/business/{business_user_id}/
+        """
+        try:
+            business_user = User.objects.get(id=business_user_id)
+            # Verify it's actually a business user
+            if business_user.profile.type != 'business':
+                return Response(
+                    {'error': 'User is not a business user'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'Business user not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get reviews for this business user
+        reviews = Review.objects.filter(business_user_id=business_user_id)
+        
+        # Apply ordering
+        ordering = request.query_params.get('ordering', '-updated_at')
+        if ordering:
+            reviews = reviews.order_by(ordering)
+        
+        serializer = self.get_serializer(reviews, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['GET'], url_path='reviewer/(?P<reviewer_id>[^/.]+)')
+    def reviewer_reviews(self, request, reviewer_id=None):
+        """
+        Get all reviews by a specific reviewer (customer).
+        URL: /api/reviews/reviewer/{reviewer_id}/
+        """
+        try:
+            reviewer = User.objects.get(id=reviewer_id)
+            # Verify it's actually a customer user
+            if reviewer.profile.type != 'customer':
+                return Response(
+                    {'error': 'User is not a customer user'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'Reviewer not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get reviews by this reviewer
+        reviews = Review.objects.filter(reviewer_id=reviewer_id)
+        
+        # Apply ordering
+        ordering = request.query_params.get('ordering', '-updated_at')
+        if ordering:
+            reviews = reviews.order_by(ordering)
+        
+        serializer = self.get_serializer(reviews, many=True)
+        return Response(serializer.data)
     
     def perform_create(self, serializer):
         # Check if user is a customer

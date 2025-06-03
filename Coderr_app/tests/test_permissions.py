@@ -1,3 +1,4 @@
+from unittest.mock import patch, PropertyMock
 from django.test import TestCase, RequestFactory
 from django.contrib.auth.models import User, AnonymousUser
 from user_auth_app.models import Profile
@@ -294,3 +295,45 @@ class ProfileSignalTest(TestCase):
         # Both should be customer by default
         self.assertEqual(user1.profile.type, 'customer')
         self.assertEqual(user2.profile.type, 'customer')
+
+class PermissionExceptionHandlingTestFixed(TestCase):
+    """Fixed test for Permission DoesNotExist exception handling"""
+    
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.business_permission = IsBusinessUser()
+        self.customer_permission = IsCustomerUser()
+    
+    def test_business_permission_profile_does_not_exist(self):
+        """Test IsBusinessUser when Profile.DoesNotExist (Zeilen 15-16)"""
+        user = User.objects.create_user(
+            username='test_business',
+            email='test@test.com',
+            password='test123'
+        )
+        
+        with patch.object(type(user), 'profile', new_callable=PropertyMock) as mock_profile:
+            mock_profile.side_effect = Profile.DoesNotExist()
+            
+            request = self.factory.get('/')
+            request.user = user
+            
+            result = self.business_permission.has_permission(request, None)
+            self.assertFalse(result)
+    
+    def test_customer_permission_profile_does_not_exist(self):
+        """Test IsCustomerUser when Profile.DoesNotExist (Zeilen 29-30)"""
+        user = User.objects.create_user(
+            username='test_customer',
+            email='test2@test.com',
+            password='test123'
+        )
+        
+        with patch.object(type(user), 'profile', new_callable=PropertyMock) as mock_profile:
+            mock_profile.side_effect = Profile.DoesNotExist()
+            
+            request = self.factory.get('/')
+            request.user = user
+            
+            result = self.customer_permission.has_permission(request, None)
+            self.assertFalse(result)

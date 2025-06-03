@@ -1,9 +1,12 @@
 from django.test import TestCase, TransactionTestCase
 from django.contrib.auth.models import User
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 from rest_framework import status
 from decimal import Decimal
+from unittest.mock import patch
+from datetime import timedelta
 from user_auth_app.models import Profile
 from Coderr_app.models import Offer, OfferDetail, Feature, Order, Review, BaseInfo
 
@@ -902,3 +905,349 @@ class ViewSetHTTPMethodsTest(TransactionTestCase):
         data = {'email': 'invalid-email'}
         response = self.client.patch(url, data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+class ViewExceptionHandlingTest(TransactionTestCase):
+    """Test exception handling and edge cases in views"""
+    
+    def setUp(self):
+        User.objects.all().delete()
+        
+        self.business_user = User.objects.create_user(
+            username='business',
+            email='business@test.com',
+            password='test123'
+        )
+        self.business_user.profile.type = 'business'
+        self.business_user.profile.save()
+        
+        self.customer_user = User.objects.create_user(
+            username='customer', 
+            email='customer@test.com',
+            password='test123'
+        )
+        
+        self.client = APIClient()
+    
+    @patch('Coderr_app.api.views.traceback.print_exc')
+    def test_offer_create_details_exception_handling(self, mock_traceback):
+        """Test exception handling in create_offer_details_from_request"""
+        self.client.force_authenticate(user=self.business_user)
+        
+        with patch('Coderr_app.models.OfferDetail.objects.create') as mock_create:
+            mock_create.side_effect = Exception("Database error")
+            
+            data = {
+                'title': 'Test Offer',
+                'description': 'Test',
+                'details': [{
+                    'offer_type': 'basic',
+                    'title': 'Basic',
+                    'price': 100,
+                    'delivery_time_in_days': 5,
+                    'revisions': 2,
+                    'features': ['Feature 1']
+                }]
+            }
+            
+            response = self.client.post(reverse('offer-list'), data, format='json')
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+            mock_traceback.assert_called()
+    
+    def test_offer_create_invalid_data_types(self):
+        """Test create_offer_details_from_request with invalid data types"""
+        self.client.force_authenticate(user=self.business_user)
+        
+        data = {
+            'title': 'Test Offer',
+            'description': 'Test',
+            'details': [{
+                'offer_type': 'basic',
+                'title': 'Basic',
+                'price': 'invalid_price',
+                'delivery_time_in_days': 'invalid_days',
+                'revisions': 'invalid_revisions',
+                'features': ['Feature 1']
+            }]
+        }
+        
+        response = self.client.post(reverse('offer-list'), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    
+    def test_offer_create_empty_feature_strings(self):
+        """Test feature creation with empty/whitespace strings"""
+        self.client.force_authenticate(user=self.business_user)
+        
+        data = {
+            'title': 'Test Offer',
+            'description': 'Test',
+            'details': [{
+                'offer_type': 'basic',
+                'title': 'Basic',
+                'price': 100,
+                'delivery_time_in_days': 5,
+                'revisions': 2,
+                'features': ['', '  ', 'Valid Feature', '\t', '   ']
+            }]
+        }
+        
+        response = self.client.post(reverse('offer-list'), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    
+    def test_offer_update_without_details_key(self):
+        """Test perform_update when no details provided in request"""
+        offer = Offer.objects.create(
+            creator=self.business_user,
+            title='Original',
+            description='Original'
+        )
+        
+        self.client.force_authenticate(user=self.business_user)
+        
+        data = {
+            'title': 'Updated',
+            'description': 'Updated'
+        }
+        
+        response = self.client.patch(
+            reverse('offer-detail', kwargs={'pk': offer.pk}),
+            data, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+    
+    def test_offer_update_features_none_case(self):
+        """Test perform_update when features_list is None"""
+        offer = Offer.objects.create(
+            creator=self.business_user,
+            title='Test',
+            description='Test'
+        )
+        
+        detail = OfferDetail.objects.create(
+            offer=offer,
+            offer_type='basic',
+            title='Basic',
+            revisions=2,
+            delivery_time_in_days=5,
+            price=Decimal('100.00')
+        )
+        
+        self.client.force_authenticate(user=self.business_user)
+        
+        data = {
+            'details': [{
+                'id': detail.id,
+                'offer_type': 'basic',
+                'title': 'Updated',
+                'price': 150,
+                'delivery_time_in_days': 3,
+                'revisions': 3
+            }]
+        }
+        
+        response = self.client.patch(
+            reverse('offer-detail', kwargs={'pk': offer.pk}),
+            data, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+class TargetedViewsCoverageTest(TransactionTestCase):
+    """Targeted tests for specific missing lines in views.py"""
+    
+    def setUp(self):
+        User.objects.all().delete()
+        
+        self.business_user = User.objects.create_user(
+            username='business',
+            email='business@test.com',
+            password='test123'
+        )
+        self.business_user.profile.type = 'business'
+        self.business_user.profile.save()
+        
+        self.customer_user = User.objects.create_user(
+            username='customer',
+            email='customer@test.com',
+            password='test123'
+        )
+        
+        self.client = APIClient()
+    
+    def test_offer_create_exception_lines_76_83(self):
+        """Test specific exception handling lines 76, 83"""
+        self.client.force_authenticate(user=self.business_user)
+        
+        data = {
+            'title': 'Exception Test',
+            'description': 'Test',
+            'details': [{
+                'offer_type': 'basic',
+                'title': None,
+                'price': 'not_a_number',
+                'delivery_time_in_days': -1,
+                'revisions': None,
+                'features': None
+            }]
+        }
+        
+        response = self.client.post(reverse('offer-list'), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    
+    def test_offer_update_lines_212_213_features_not_none(self):
+        """Test lines 212-213: if features_list is not None"""
+        offer = Offer.objects.create(
+            creator=self.business_user,
+            title='Test',
+            description='Test'
+        )
+        
+        detail = OfferDetail.objects.create(
+            offer=offer,
+            offer_type='basic',
+            title='Basic',
+            revisions=2,
+            delivery_time_in_days=5,
+            price=Decimal('100.00')
+        )
+        
+        Feature.objects.create(offer_detail=detail, description='Original')
+        
+        self.client.force_authenticate(user=self.business_user)
+        
+        data = {
+            'details': [{
+                'id': detail.id,
+                'offer_type': 'basic',
+                'title': 'Updated',
+                'price': 150,
+                'delivery_time_in_days': 3,
+                'revisions': 3,
+                'features': ['New Feature 1', 'New Feature 2']
+            }]
+        }
+        
+        response = self.client.patch(
+            reverse('offer-detail', kwargs={'pk': offer.pk}),
+            data,
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        detail.refresh_from_db()
+        self.assertEqual(detail.features.count(), 2)
+    
+    def test_order_validation_lines_302_308_310_315(self):
+        """Test exact validation lines in OrderViewSet"""
+        self.client.force_authenticate(user=self.customer_user)
+        
+        # Test missing offer_detail_id
+        response = self.client.post(reverse('order-list'), {})
+        self.assertIn(response.status_code, [400, 403])
+        
+        # Test invalid offer_detail_id
+        response = self.client.post(reverse('order-list'), {'offer_detail_id': 99999})
+        self.assertIn(response.status_code, [400, 403])
+        
+        # Test string offer_detail_id
+        response = self.client.post(reverse('order-list'), {'offer_detail_id': 'invalid'})
+        self.assertIn(response.status_code, [400, 403])
+
+class TargetedViewsCoverageTest(TransactionTestCase):
+    """Targeted tests for specific missing lines in views.py"""
+    
+    def setUp(self):
+        User.objects.all().delete()
+        
+        self.business_user = User.objects.create_user(
+            username='business',
+            email='business@test.com',
+            password='test123'
+        )
+        self.business_user.profile.type = 'business'
+        self.business_user.profile.save()
+        
+        self.customer_user = User.objects.create_user(
+            username='customer',
+            email='customer@test.com',
+            password='test123'
+        )
+        
+        self.client = APIClient()
+    
+    def test_offer_create_exception_lines_76_83(self):
+        """Test specific exception handling lines 76, 83"""
+        self.client.force_authenticate(user=self.business_user)
+        
+        data = {
+            'title': 'Exception Test',
+            'description': 'Test',
+            'details': [{
+                'offer_type': 'basic',
+                'title': None,
+                'price': 'not_a_number',
+                'delivery_time_in_days': -1,
+                'revisions': None,
+                'features': None
+            }]
+        }
+        
+        response = self.client.post(reverse('offer-list'), data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    
+    def test_offer_update_lines_212_213_features_not_none(self):
+        """Test lines 212-213: if features_list is not None"""
+        offer = Offer.objects.create(
+            creator=self.business_user,
+            title='Test',
+            description='Test'
+        )
+        
+        detail = OfferDetail.objects.create(
+            offer=offer,
+            offer_type='basic',
+            title='Basic',
+            revisions=2,
+            delivery_time_in_days=5,
+            price=Decimal('100.00')
+        )
+        
+        Feature.objects.create(offer_detail=detail, description='Original')
+        
+        self.client.force_authenticate(user=self.business_user)
+        
+        data = {
+            'details': [{
+                'id': detail.id,
+                'offer_type': 'basic',
+                'title': 'Updated',
+                'price': 150,
+                'delivery_time_in_days': 3,
+                'revisions': 3,
+                'features': ['New Feature 1', 'New Feature 2']
+            }]
+        }
+        
+        response = self.client.patch(
+            reverse('offer-detail', kwargs={'pk': offer.pk}),
+            data,
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        detail.refresh_from_db()
+        self.assertEqual(detail.features.count(), 2)
+    
+    def test_order_validation_lines_302_308_310_315(self):
+        """Test exact validation lines in OrderViewSet"""
+        self.client.force_authenticate(user=self.customer_user)
+        
+        # Test missing offer_detail_id
+        response = self.client.post(reverse('order-list'), {})
+        self.assertIn(response.status_code, [400, 403])
+        
+        # Test invalid offer_detail_id
+        response = self.client.post(reverse('order-list'), {'offer_detail_id': 99999})
+        self.assertIn(response.status_code, [400, 403])
+        
+        # Test string offer_detail_id
+        response = self.client.post(reverse('order-list'), {'offer_detail_id': 'invalid'})
+        self.assertIn(response.status_code, [400, 403])

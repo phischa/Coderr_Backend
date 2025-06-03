@@ -519,4 +519,33 @@ class SerializerIntegrationTest(TestCase):
         self.assertEqual(order_data['business_username'], 'businessuser')
         self.assertEqual(order_data['price'], Decimal('50.00'))
         self.assertEqual(order_data['title'], 'Basic Package')
+
+class SerializerLine217Test(TestCase):
+    """Test exact line 217 in serializers.py"""
+    
+    def test_serializer_line_217_validation_error(self):
+        """Test the exact validation error on line 217"""
+        business_user = User.objects.create_user(
+            username='business',
+            email='business@test.com',
+            password='test123'
+        )
+        business_user.profile.type = 'business'
+        business_user.profile.save()
+        
+        customer_user = User.objects.create_user(
+            username='customer',
+            email='customer@test.com',
+            password='test123'
+        )
+        
+        serializer = OrderSerializer(data={
+            'offer_detail_id': 99999,  # Non-existent
+            'customer': customer_user.id,
+            'business_user': business_user.id
+        })
+        
+        is_valid = serializer.is_valid()
+        self.assertFalse(is_valid)
+        self.assertIn('offer_detail_id', serializer.errors)
         

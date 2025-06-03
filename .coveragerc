@@ -1,0 +1,12 @@
+[run]
+source = Coderr_app
+omit = 
+    Coderr_app/views.py
+    Coderr_app/management/commands/create_dummy_data.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+
+[html]
+directory = htmlcov

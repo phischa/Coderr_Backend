@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
@@ -480,4 +480,3 @@ class BaseInfoModelTest(TestCase):
         
         # Should have updated user count
         self.assertGreaterEqual(base_info.total_users, 1)
-        

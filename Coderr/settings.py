@@ -11,7 +11,6 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
-import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -125,31 +124,15 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-REST_FRAMEWORK_BASE = {
+REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
-}
-
-# Production Settings (mit Pagination)
-REST_FRAMEWORK_PRODUCTION = {
-    **REST_FRAMEWORK_BASE,
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 6,
 }
 
-# Test Settings (ohne Pagination)
-REST_FRAMEWORK_TEST = {
-    **REST_FRAMEWORK_BASE,
-    # Keine Pagination für Tests
-}
-
-# Wähle Settings basierend auf Kontext
-if 'test' in sys.argv:
-    REST_FRAMEWORK = REST_FRAMEWORK_TEST
-else:
-    REST_FRAMEWORK = REST_FRAMEWORK_PRODUCTION
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/

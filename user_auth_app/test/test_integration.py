@@ -143,27 +143,28 @@ class ProfileFilteringTest(TransactionTestCase):
         business_count = Profile.objects.filter(type='business').count()
         customer_count = Profile.objects.filter(type='customer').count()
         total_expected = business_count + customer_count
-        
+
         all_profiles_url = reverse('profile-list')
         all_response = self.client.get(all_profiles_url)
-        
+
         self.assertEqual(all_response.status_code, status.HTTP_200_OK)
-        
+
         # FIX: Use results array for paginated response
         if isinstance(all_response.data, dict) and 'results' in all_response.data:
             actual_count = len(all_response.data['results'])
         else:
             actual_count = len(all_response.data)  # Fallback for non-paginated
-        
-        self.assertEqual(actual_count, total_expected, f"Expected {total_expected} total profiles, got {actual_count}")
+
+        self.assertEqual(actual_count, total_expected,
+                         f"Expected {total_expected} total profiles, got {actual_count}")
 
     def test_business_profiles_filter(self):
         """Test filtering business profiles - FIXED"""
         business_url = reverse('business-profiles')
         business_response = self.client.get(business_url)
-        
+
         self.assertEqual(business_response.status_code, status.HTTP_200_OK)
-        
+
         # FIX: Handle pagination
         if isinstance(business_response.data, dict) and 'results' in business_response.data:
             actual_count = len(business_response.data['results'])
@@ -171,10 +172,11 @@ class ProfileFilteringTest(TransactionTestCase):
         else:
             actual_count = len(business_response.data)
             profiles_data = business_response.data
-            
+
         expected_count = len(self.business_users)
-        self.assertEqual(actual_count, expected_count, f"Expected {expected_count} business profiles, got {actual_count}")
-        
+        self.assertEqual(actual_count, expected_count,
+                         f"Expected {expected_count} business profiles, got {actual_count}")
+
         for profile in profiles_data:
             self.assertEqual(profile['type'], 'business')
 
@@ -182,9 +184,9 @@ class ProfileFilteringTest(TransactionTestCase):
         """Test filtering customer profiles - FIXED"""
         customer_url = reverse('customer-profiles')
         customer_response = self.client.get(customer_url)
-        
+
         self.assertEqual(customer_response.status_code, status.HTTP_200_OK)
-        
+
         # FIX: Handle pagination
         if isinstance(customer_response.data, dict) and 'results' in customer_response.data:
             actual_count = len(customer_response.data['results'])
@@ -192,10 +194,11 @@ class ProfileFilteringTest(TransactionTestCase):
         else:
             actual_count = len(customer_response.data)
             profiles_data = customer_response.data
-            
+
         expected_count = len(self.customer_users)
-        self.assertEqual(actual_count, expected_count, f"Expected {expected_count} customer profiles, got {actual_count}")
-        
+        self.assertEqual(actual_count, expected_count,
+                         f"Expected {expected_count} customer profiles, got {actual_count}")
+
         for profile in profiles_data:
             self.assertEqual(profile['type'], 'customer')
 
@@ -211,7 +214,7 @@ class PerformanceTest(TransactionTestCase):
         Token.objects.all().delete()
 
     def test_large_profile_list_performance(self):
-        """Test performance with many profiles"""
+        """Test performance with many profiles - pagination aware"""
         users_count = 20
 
         created_users = []
@@ -228,21 +231,46 @@ class PerformanceTest(TransactionTestCase):
             created_users.append(user)
 
         total_profiles = Profile.objects.count()
+        total_users = User.objects.count()
+
+        self.assertEqual(total_users, users_count,
+                         f"Expected {users_count} users in DB, got {total_users}")
         self.assertEqual(total_profiles, users_count,
                          f"Expected {users_count} profiles in DB, got {total_profiles}")
 
-        # Test profile list endpoint
         profiles_url = reverse('profile-list')
         response = self.client.get(profiles_url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        if isinstance(response.data, dict) and 'results' in response.data:
-            actual_response_count = len(response.data['results'])
+        if isinstance(response.data, dict) and 'count' in response.data:
+            total_count = response.data['count']
+            self.assertEqual(total_count, users_count,
+                             f"Expected {users_count} total profiles, got {total_count}")
+
+            if isinstance(response.data, dict) and 'results' in response.data:
+                results_count = len(response.data['results'])
+            else:
+                results_count = len(response.data)
+            expected_first_page = min(6, users_count)
+            self.assertEqual(results_count, expected_first_page,
+                             f"Expected {expected_first_page} profiles in first page, got {results_count}")
+            self.assertIn('next', response.data,
+                          "Paginated response should have 'next' field")
+            self.assertIn('previous', response.data,
+                          "Paginated response should have 'previous' field")
+
+            if users_count > 6:
+                self.assertIsNotNone(
+                    response.data['next'], "Should have next page with more than 6 profiles")
+            else:
+                self.assertIsNone(
+                    response.data['next'], "Should not have next page with 6 or fewer profiles")
+
         else:
             actual_response_count = len(response.data)
-        self.assertEqual(actual_response_count, users_count,
-                         f"Expected {users_count} profiles in response, got {actual_response_count}")
+            self.assertEqual(actual_response_count, users_count,
+                             f"Expected {users_count} profiles in response, got {actual_response_count}")
 
     def test_rapid_guest_user_creation(self):
         """Test rapid creation of guest users"""
@@ -250,8 +278,6 @@ class PerformanceTest(TransactionTestCase):
 
         initial_count = User.objects.filter(
             username__startswith='guest_').count()
-
-        # Create 10 guest users
         guest_count = 10
         for _ in range(guest_count):
             response = self.client.post(guest_url)

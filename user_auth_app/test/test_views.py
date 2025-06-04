@@ -169,8 +169,10 @@ class ProfileViewSetTest(TransactionTestCase):
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         
-        # We should get exactly 2 profiles
-        actual_count = len(response.data)
+        if isinstance(response.data, dict) and 'results' in response.data:
+            actual_count = len(response.data['results'])
+        else:
+            actual_count = len(response.data)
         self.assertEqual(actual_count, 2, f"Expected 2 profiles in response, got {actual_count}")
 
     def test_retrieve_profile(self):

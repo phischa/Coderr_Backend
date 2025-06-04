@@ -214,7 +214,6 @@ class PerformanceTest(TransactionTestCase):
         """Test performance with many profiles"""
         users_count = 20
 
-        # Create exactly 20 users
         created_users = []
         for i in range(users_count):
             user = User.objects.create_user(
@@ -228,7 +227,6 @@ class PerformanceTest(TransactionTestCase):
             profile.save()
             created_users.append(user)
 
-        # Verify we created exactly what we expect
         total_profiles = Profile.objects.count()
         self.assertEqual(total_profiles, users_count,
                          f"Expected {users_count} profiles in DB, got {total_profiles}")
@@ -239,7 +237,10 @@ class PerformanceTest(TransactionTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        actual_response_count = len(response.data)
+        if isinstance(response.data, dict) and 'results' in response.data:
+            actual_response_count = len(response.data['results'])
+        else:
+            actual_response_count = len(response.data)
         self.assertEqual(actual_response_count, users_count,
                          f"Expected {users_count} profiles in response, got {actual_response_count}")
 

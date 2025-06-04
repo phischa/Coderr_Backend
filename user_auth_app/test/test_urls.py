@@ -1,7 +1,7 @@
-from django.test import TestCase, TransactionTestCase, APIClient
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse, resolve
 from django.contrib.auth.models import User
-from rest_framework.test import APITestCase
+from rest_framework.test import APITestCase, APIClient
 from rest_framework.authtoken.models import Token
 from user_auth_app.api import views
 
@@ -111,7 +111,11 @@ class HTTPMethodTest(TransactionTestCase):
     """Test cases for HTTP methods on different URLs"""
     
     def setUp(self):
+        self.client = APIClient()
+    
         User.objects.all().delete()
+        Token.objects.all().delete()
+        
         self.user = User.objects.create_user(
             username='testuser',
             email='test@example.com',

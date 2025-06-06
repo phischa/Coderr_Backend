@@ -39,7 +39,8 @@ def login_view(request):
                 'token': token.key,
                 'user_id': user.id,
                 'username': user.username,
-                'type': user.profile.type
+                'type': user.profile.type,
+                'is_guest': user.profile.is_guest
             })
         
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
@@ -64,8 +65,6 @@ def registration_view(request):
         user = serializer.save()
         token, _ = Token.objects.get_or_create(user=user)
         profile_type = serializer.validated_data.get('type')
-        
-        # Profile is created by signals, we just update the type
         profile = user.profile
         profile.type = profile_type
         profile.save()
@@ -74,7 +73,8 @@ def registration_view(request):
             'token': token.key,
             'user_id': user.id,
             'username': user.username,
-            'type': profile_type  
+            'type': profile_type,
+            'is_guest': False
         })
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -113,6 +113,12 @@ class ProfileViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
     
         elif request.method == 'PATCH':
+            if request.user.id != pk and not request.user.is_staff:
+                return Response(
+                    {'error': 'You can only update your own profile'}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
             serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
@@ -154,9 +160,9 @@ class GuestLoginView(APIView):
     """
     API view for guest user login.
     
-    Creates a temporary user account with a unique username and random password.
+    Creates or retrieves a guest user for the current session.
+    Supports both business and customer guest types.
     Returns an authentication token for the guest user.
-    Accessible to unauthenticated users.
     """
     permission_classes = [AllowAny]
     
@@ -164,29 +170,57 @@ class GuestLoginView(APIView):
         """
         Process a guest login request.
         
-        Creates a temporary user with a UUID-based username and random password.
-        Marks the user profile as a guest account.
+        Creates a temporary user for the session or retrieves existing session guest.
         
         Args:
-            request: The HTTP request object.
+            request: The HTTP request object. Can contain 'type' parameter
+                    to specify 'business' or 'customer' (defaults to 'customer').
             
         Returns:
-            Response: Success response with token, username, email,
-            and guest status flag.
+            Response: Success response with token, username, user_id,
+            guest status flag, and user type.
         """
-        guest_username = f"guest_{uuid.uuid4().hex[:8]}"
+        guest_type = request.data.get('type', 'customer')
+        if guest_type not in ['business', 'customer']:
+            return Response({
+                'error': 'Invalid guest type. Must be "business" or "customer".'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        session_key = f'guest_{guest_type}_user_id'
+        existing_guest_id = request.session.get(session_key)
+        
+        if existing_guest_id:
+            try:
+                guest_user = User.objects.get(id=existing_guest_id, profile__is_guest=True)
+                token, _ = Token.objects.get_or_create(user=guest_user)
+                
+                return Response({
+                    'status': 'success',
+                    'token': token.key,
+                    'user_id': guest_user.id,
+                    'username': guest_user.username,
+                    'is_guest': True,
+                    'type': guest_type,
+                    'message': 'Existing guest session retrieved'
+                })
+            except User.DoesNotExist:
+                pass
+
+        guest_username = f"guest_{guest_type}_{uuid.uuid4().hex[:8]}"
         temp_password = uuid.uuid4().hex
+        
         guest_user = User.objects.create_user(
-            username = guest_username,
-            email = f"{guest_username}@example.com",
-            password = temp_password
+            username=guest_username,
+            email=f"{guest_username}@example.com",
+            password=temp_password
         )
         profile = guest_user.profile
         profile.is_guest = True
-        profile.type = 'customer'  # Default guest to customer type
+        profile.type = guest_type
         profile.save()
-        
         token, _ = Token.objects.get_or_create(user=guest_user)
+        request.session[session_key] = guest_user.id
+        request.session.set_expiry(86400)  # Session expires after 24 hours
         
         return Response({
             'status': 'success',
@@ -194,5 +228,6 @@ class GuestLoginView(APIView):
             'user_id': guest_user.id,
             'username': guest_username,
             'is_guest': True,
-            'type': 'customer'
+            'type': guest_type,
+            'message': 'New guest user created'
         })

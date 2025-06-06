@@ -133,6 +133,12 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 6,
 }
 
+# Session configuration
+
+SESSION_COOKIE_AGE = 86400  # 24 hours in seconds
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+SESSION_SAVE_EVERY_REQUEST = True 
+
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/

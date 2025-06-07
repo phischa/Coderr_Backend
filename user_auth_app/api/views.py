@@ -16,10 +16,25 @@ from .serializers import (
 )
 
 
+GUEST_CREDENTIALS = {
+    'customer': {
+        'username': 'andrey',
+        'password': 'asdasd'
+    },
+    'business': {
+        'username': 'kevin',
+        'password': 'asdasd24'
+    }
+}
+
+
 @api_view(['POST'])
 def login_view(request):
     """
-    Handle user login and return auth token.
+    Unified login handler for both regular users and guest users.
+    
+    Detects guest login attempts based on predefined credentials and
+    creates/retrieves session-based guest users automatically.
     
     Args:
         request: Contains username/email and password
@@ -31,21 +46,87 @@ def login_view(request):
     if serializer.is_valid():
         username = serializer.validated_data['username']
         password = serializer.validated_data['password']
-        user = authenticate(username=username, password=password)
+        guest_type = None
+        for user_type, credentials in GUEST_CREDENTIALS.items():
+            if username == credentials['username'] and password == credentials['password']:
+                guest_type = user_type
+                break
         
-        if user:
-            token, _ = Token.objects.get_or_create(user=user)
-            return Response({
-                'token': token.key,
-                'user_id': user.id,
-                'username': user.username,
-                'type': user.profile.type,
-                'is_guest': user.profile.is_guest
-            })
-        
-        return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
+        if guest_type:
+            return handle_guest_login(request, guest_type)
+        else:
+            user = authenticate(username=username, password=password)
+            
+            if user:
+                token, _ = Token.objects.get_or_create(user=user)
+                return Response({
+                    'token': token.key,
+                    'user_id': user.id,
+                    'username': user.username,
+                    'type': user.profile.type,
+                    'is_guest': user.profile.is_guest
+                })
+            
+            return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+def handle_guest_login(request, guest_type):
+    """
+    Handle guest login by creating or retrieving a session-based guest user.
+    
+    Args:
+        request: The HTTP request
+        guest_type: Either 'customer' or 'business'
+        
+    Returns:
+        Response with guest user token and info
+    """
+    # Check if there's already a guest user in the session
+    session_key = f'guest_{guest_type}_user_id'
+    existing_guest_id = request.session.get(session_key)
+    
+    if existing_guest_id:
+        try:
+            guest_user = User.objects.get(id=existing_guest_id, profile__is_guest=True)
+            token, _ = Token.objects.get_or_create(user=guest_user)
+            
+            return Response({
+                'token': token.key,
+                'user_id': guest_user.id,
+                'username': guest_user.username,
+                'type': guest_type,
+                'is_guest': True,
+                'message': 'Existing guest session retrieved'
+            })
+        except User.DoesNotExist:
+            pass
+
+    guest_username = f"guest_{guest_type}_{uuid.uuid4().hex[:8]}"
+    temp_password = uuid.uuid4().hex
+    
+    guest_user = User.objects.create_user(
+        username=guest_username,
+        email=f"{guest_username}@example.com",
+        password=temp_password
+    )
+    profile = guest_user.profile
+    profile.is_guest = True
+    profile.type = guest_type
+    profile.save()
+    token, _ = Token.objects.get_or_create(user=guest_user)
+    request.session[session_key] = guest_user.id
+    request.session.set_expiry(86400)  # Session expires after 24 hours
+    
+    return Response({
+        'token': token.key,
+        'user_id': guest_user.id,
+        'username': guest_username,
+        'type': guest_type,
+        'is_guest': True,
+        'message': 'New guest user created'
+    })
 
 
 @api_view(['POST'])
@@ -113,9 +194,9 @@ class ProfileViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
     
         elif request.method == 'PATCH':
-            if request.user.id != pk and not request.user.is_staff:
+            if request.user.id != pk or request.user.profile.is_guest:
                 return Response(
-                    {'error': 'You can only update your own profile'}, 
+                    {'error': 'You can only update your own profile. Guest users cannot update profiles.'}, 
                     status=status.HTTP_403_FORBIDDEN
                 )
             
@@ -156,78 +237,23 @@ class ProfileViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+# Optional: Keep GuestLoginView for backward compatibility or direct guest login
 class GuestLoginView(APIView):
     """
-    API view for guest user login.
-    
-    Creates or retrieves a guest user for the current session.
-    Supports both business and customer guest types.
-    Returns an authentication token for the guest user.
+    Direct guest login endpoint (optional - kept for backward compatibility).
+    The main guest login is now handled through the unified login_view.
     """
     permission_classes = [AllowAny]
     
     def post(self, request):
         """
-        Process a guest login request.
-        
-        Creates a temporary user for the session or retrieves existing session guest.
-        
-        Args:
-            request: The HTTP request object. Can contain 'type' parameter
-                    to specify 'business' or 'customer' (defaults to 'customer').
-            
-        Returns:
-            Response: Success response with token, username, user_id,
-            guest status flag, and user type.
+        Process a direct guest login request.
         """
         guest_type = request.data.get('type', 'customer')
+        
         if guest_type not in ['business', 'customer']:
             return Response({
                 'error': 'Invalid guest type. Must be "business" or "customer".'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        session_key = f'guest_{guest_type}_user_id'
-        existing_guest_id = request.session.get(session_key)
-        
-        if existing_guest_id:
-            try:
-                guest_user = User.objects.get(id=existing_guest_id, profile__is_guest=True)
-                token, _ = Token.objects.get_or_create(user=guest_user)
-                
-                return Response({
-                    'status': 'success',
-                    'token': token.key,
-                    'user_id': guest_user.id,
-                    'username': guest_user.username,
-                    'is_guest': True,
-                    'type': guest_type,
-                    'message': 'Existing guest session retrieved'
-                })
-            except User.DoesNotExist:
-                pass
-
-        guest_username = f"guest_{guest_type}_{uuid.uuid4().hex[:8]}"
-        temp_password = uuid.uuid4().hex
-        
-        guest_user = User.objects.create_user(
-            username=guest_username,
-            email=f"{guest_username}@example.com",
-            password=temp_password
-        )
-        profile = guest_user.profile
-        profile.is_guest = True
-        profile.type = guest_type
-        profile.save()
-        token, _ = Token.objects.get_or_create(user=guest_user)
-        request.session[session_key] = guest_user.id
-        request.session.set_expiry(86400)  # Session expires after 24 hours
-        
-        return Response({
-            'status': 'success',
-            'token': token.key,
-            'user_id': guest_user.id,
-            'username': guest_username,
-            'is_guest': True,
-            'type': guest_type,
-            'message': 'New guest user created'
-        })
+        return handle_guest_login(request, guest_type)

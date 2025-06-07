@@ -72,6 +72,7 @@ class FeatureSerializer(serializers.ModelSerializer):
 class OfferDetailSerializer(serializers.ModelSerializer):
     """
     Serializer for OfferDetail.
+    Handles default values for null fields to match frontend expectations.
     """
     features = serializers.SerializerMethodField()
     
@@ -83,11 +84,30 @@ class OfferDetailSerializer(serializers.ModelSerializer):
     def get_features(self, obj):
         # Return just the feature descriptions as a list of strings
         return [feature.description for feature in obj.features.all()]
+    
+    def to_representation(self, instance):
+        """
+        Override to provide default values for null fields.
+        This ensures the frontend receives consistent data regardless of 
+        whether it expects null or default values.
+        """
+        data = super().to_representation(instance)
+        
+        # Replace null values with sensible defaults
+        if data.get('revisions') is None:
+            data['revisions'] = 1
+        if data.get('delivery_time_in_days') is None:
+            data['delivery_time_in_days'] = 1
+        if data.get('price') is None:
+            data['price'] = 0
+            
+        return data
 
 
 class OfferDetailWithFeaturesSerializer(serializers.ModelSerializer):
     """
     Serializer for OfferDetail with expanded features.
+    Handles default values for null fields.
     """
     features = serializers.SerializerMethodField()
     
@@ -99,6 +119,22 @@ class OfferDetailWithFeaturesSerializer(serializers.ModelSerializer):
     def get_features(self, obj):
         # Return just the feature descriptions as a list of strings
         return [feature.description for feature in obj.features.all()]
+    
+    def to_representation(self, instance):
+        """
+        Override to provide default values for null fields.
+        """
+        data = super().to_representation(instance)
+        
+        # Replace null values with sensible defaults
+        if data.get('revisions') is None:
+            data['revisions'] = 1
+        if data.get('delivery_time_in_days') is None:
+            data['delivery_time_in_days'] = 1
+        if data.get('price') is None:
+            data['price'] = 0
+            
+        return data
 
 
 class OfferSerializer(serializers.ModelSerializer):

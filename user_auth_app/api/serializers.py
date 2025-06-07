@@ -2,6 +2,8 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from user_auth_app.models import Profile
 
+RESERVED_USERNAMES = ['andrey', 'kevin']
+
 
 class UserSerializer(serializers.ModelSerializer):
     """
@@ -69,6 +71,16 @@ class RegistrationSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['username', 'email', 'password', 'repeated_password', 'type', 'first_name', 'last_name']
+
+    def validate_username(self, value):
+        """
+        Check that the username is not reserved for guest users.
+        """
+        if value.lower() in [name.lower() for name in RESERVED_USERNAMES]:
+            raise serializers.ValidationError(
+                f"The username '{value}' is reserved and cannot be used for registration."
+            )
+        return value
 
     def validate(self, data):
         if data['password'] != data['repeated_password']:

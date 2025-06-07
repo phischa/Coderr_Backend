@@ -79,6 +79,7 @@ class OfferViewSet(viewsets.ModelViewSet):
             user_profile = self.request.user.profile
             if user_profile.type != 'business':
                 raise PermissionDenied("Only business users can create offers")
+            # No restriction on guest status - both regular and guest business users can create offers
         except Profile.DoesNotExist:
             raise PermissionDenied("User profile not found")
     
@@ -116,6 +117,10 @@ class OfferViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         """Update offer and its related details"""
+        # Check if the user owns this offer
+        if serializer.instance.creator != self.request.user:
+            raise PermissionDenied("You can only update your own offers")
+            
         offer = serializer.save()
         details_data = self.request.data.get('details', [])
         if details_data:
@@ -143,6 +148,10 @@ class OfferViewSet(viewsets.ModelViewSet):
                             )
     
     def perform_destroy(self, instance):
+        # Check if the user owns this offer
+        if instance.creator != self.request.user:
+            raise PermissionDenied("You can only delete your own offers")
+            
         super().perform_destroy(instance)
         BaseInfo.update_stats()
 
@@ -170,6 +179,10 @@ class OfferDetailViewSet(viewsets.ModelViewSet):
             )
     
     def perform_update(self, serializer):
+        # Check if the user owns the offer
+        if serializer.instance.offer.creator != self.request.user:
+            raise PermissionDenied("You can only update details of your own offers")
+            
         offer_detail = serializer.save()
         features_data = self.request.data.get('features')
         if features_data is not None:
@@ -212,9 +225,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         except Profile.DoesNotExist:
             raise PermissionDenied("User profile not found")
             
-        # Check if user is a customer
+        # Check if user is a customer (including guest customers)
         if user_profile.type != 'customer':
             raise PermissionDenied("Only customers can create orders")
+        
+        # No restriction on guest status - both regular and guest customers can create orders
             
         # Get offer_detail from the request data
         # The frontend might send either 'offer_detail' or 'offer_detail_id'
@@ -245,6 +260,20 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
     
     def perform_update(self, serializer):
+        # Check if user owns this order (as business or customer)
+        order = serializer.instance
+        user = self.request.user
+        
+        # Business users (including guests) can update order status
+        if user == order.business_user:
+            # Business users can update orders they're assigned to
+            pass
+        elif user == order.customer:
+            # Customers can also update their own orders (e.g., cancel)
+            pass
+        else:
+            raise PermissionDenied("You can only update orders you're involved in")
+        
         old_status = serializer.instance.status
         instance = serializer.save()
         if old_status != 'completed' and instance.status == 'completed':
@@ -268,8 +297,6 @@ class OrderViewSet(viewsets.ModelViewSet):
         ).count()
         return Response({'completed_order_count': count})
 
-
-# Fügen Sie diese erweiterte ReviewViewSet in Ihre views.py ein:
 
 class ReviewViewSet(viewsets.ModelViewSet):
     """API endpoint for reviews"""
@@ -381,14 +408,23 @@ class ReviewViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
     
     def perform_create(self, serializer):
-        # Check if user is a customer
-        if self.request.user.profile.type != 'customer':
-            raise PermissionDenied("Only customers can submit reviews")
+        # Check if user is a customer (including guest customers)
+        try:
+            user_profile = self.request.user.profile
+            if user_profile.type != 'customer':
+                raise PermissionDenied("Only customers can submit reviews")
+            # No restriction on guest status - both regular and guest customers can create reviews
+        except Profile.DoesNotExist:
+            raise PermissionDenied("User profile not found")
             
         serializer.save(reviewer=self.request.user)
         BaseInfo.update_stats()
     
     def perform_destroy(self, instance):
+        # Check if the user owns this review
+        if instance.reviewer != self.request.user:
+            raise PermissionDenied("You can only delete your own reviews")
+            
         super().perform_destroy(instance)
         BaseInfo.update_stats()
 
@@ -424,6 +460,13 @@ class ProfileViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
     
         elif request.method == 'PATCH':
+            # Only allow users to update their own profile
+            if request.user.id != int(pk) and not request.user.is_staff:
+                return Response(
+                    {'error': 'You can only update your own profile'}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+                
             serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()

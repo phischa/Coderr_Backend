@@ -48,28 +48,28 @@ The Coderr platform consists of two main components:
 
 ### Installation Steps
 #### 1. Clone the repository
-    git clone "repository-url" <br>
+    git clone "repository-url"
     cd coderr-backend
 
 #### 2. Create and activate virtual environment
-python -m venv env
+    python -m venv env
 
 #### 2.1 Activate virtual enviroment on Windows
-env\Scripts\activate
+    env\Scripts\activate
 
 #### 2.1 Activate virtual enviroment on macOS/Linux
-source env/bin/activate
+    source env/bin/activate
 
 #### 3. Install dependencies
-pip install -r requirements.txt
+    pip install -r requirements.txt
 
 #### 4. Environment Configuration
 #### 4.1 Create a .env file
-In your project root directory (same folder as manage.py), create a new file called .env
+    In your project root directory (same folder as manage.py), create a new file called .env
 
 #### 4.2 Generate a SECRET_KEY
 Run this command in your terminal (with virtual environment activated):
-python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+    python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 This will output a secret key like: django-insecure-abc123def456...
 
 #### 4.3 Add configuration to .env file
@@ -88,14 +88,14 @@ DEBUG=True enables development mode (never use this in production!)
 Do NOT commit the .env file to version control (it should be in your .gitignore)
 
 #### 5. Database Setup
-python manage.py makemigrations
-python manage.py migrate
+    python manage.py makemigrations
+    python manage.py migrate
 
 #### 6. Create Superuser (Optional)
-python manage.py createsuperuser
+    python manage.py createsuperuser
 
 #### 7. Run Development Server
-python manage.py runserver
+    python manage.py runserver
 The API will be available at http://127.0.0.1:8000/
 
 ## API Endpoints
@@ -151,11 +151,11 @@ Update CORS_ALLOWED_ORIGINS in settings.py for production use.
 
 ## Development
 ### Running Tests
-python manage.py test
+    python manage.py test
 
 ### Creating Migrations
-python manage.py makemigrations
-python manage.py migrate
+    python manage.py makemigrations
+    python manage.py migrate
 
 ### Admin Interface
 Access the Django admin at http://127.0.0.1:8000/admin/ with superuser credentials.

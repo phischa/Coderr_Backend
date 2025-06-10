@@ -48,8 +48,8 @@ The Coderr platform consists of two main components:
 
 ### Installation Steps
 #### 1. Clone the repository
-git clone "repository-url"
-cd coderr-backend
+    git clone "repository-url" <br>
+    cd coderr-backend
 
 #### 2. Create and activate virtual environment
 python -m venv env

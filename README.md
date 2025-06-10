@@ -65,16 +65,16 @@ The Coderr platform consists of two main components:
 
 #### 4. Environment Configuration
 #### 4.1 Create a .env file
-    In your project root directory (same folder as manage.py), create a new file called .env
+In your project root directory (same folder as manage.py), create a new file called .env
 
 #### 4.2 Generate a SECRET_KEY
-Run this command in your terminal (with virtual environment activated):
-    python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+Run this command in your terminal (with virtual environment activated): <br>
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())" <br>
 This will output a secret key like: django-insecure-abc123def456...
 
 #### 4.3 Add configuration to .env file
 Open the .env file you created and add these lines:
-envSECRET_KEY=your-generated-secret-key-here
+SECRET_KEY=your-generated-secret-key-here
 DEBUG=True
 
 **Example .env file:**

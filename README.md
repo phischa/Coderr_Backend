@@ -52,13 +52,12 @@ git clone <repository-url>
 cd coderr-backend
 
 #### 2. Create and activate virtual environment
-# Create virtual environment
 python -m venv venv
 
-# Activate on Windows
+#### 2.2 Activate virtual enviroment on Windows
 venv\Scripts\activate
 
-# Activate on macOS/Linux
+#### 2.2 Activate virtual enviroment on macOS/Linux
 source venv/bin/activate
 
 #### 3. Install dependencies

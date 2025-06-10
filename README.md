@@ -83,7 +83,6 @@ The API will be available at http://127.0.0.1:8000/
 ### Authentication Endpoints
 * **POST** /api/auth/registration/ - User registration
 * **POST** /api/auth/login/ - User login
-* **POST** /api/auth/guest-login/ - Guest user login
 ### Core API Endpoints
 * **GET/POST** /api/offers/ - List/Create offers
 * **GET/PUT/DELETE** /api/offers/{id}/ - Retrieve/Update/Delete offer

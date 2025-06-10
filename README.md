@@ -69,7 +69,7 @@ In your project root directory (same folder as manage.py), create a new file cal
 
 #### 4.2 Generate a SECRET_KEY
 Run this command in your terminal (with virtual environment activated): <br>
-    python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())" <br>
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())" <br>
 This will output a secret key like: django-insecure-abc123def456...
 
 #### 4.3 Add configuration to .env file
@@ -78,7 +78,7 @@ SECRET_KEY=your-generated-secret-key-here
 DEBUG=True
 
 **Example .env file:**
-envSECRET_KEY=django-insecure-abcd1234efgh5678ijkl9012mnop3456qrst7890uvwx
+SECRET_KEY=django-insecure-abcd1234efgh5678ijkl9012mnop3456qrst7890uvwx
 DEBUG=True
 
 **Important Notes:**

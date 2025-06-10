@@ -52,21 +52,40 @@ git clone <repository-url>
 cd coderr-backend
 
 #### 2. Create and activate virtual environment
-python -m venv venv
+python -m venv env
 
-#### 2.2 Activate virtual enviroment on Windows
-venv\Scripts\activate
+#### 2.1 Activate virtual enviroment on Windows
+env\Scripts\activate
 
-#### 2.2 Activate virtual enviroment on macOS/Linux
-source venv/bin/activate
+#### 2.1 Activate virtual enviroment on macOS/Linux
+source env/bin/activate
 
 #### 3. Install dependencies
 pip install -r requirements.txt
 
 #### 4. Environment Configuration
-Create a .env file in the project root:
-envSECRET_KEY=your-secret-key-here
+#### 4.1 Create a .env file
+In your project root directory (same folder as manage.py), create a new file called .env
+
+#### 4.2 Generate a SECRET_KEY
+Run this command in your terminal (with virtual environment activated):
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+This will output a secret key like: django-insecure-abc123def456...
+
+#### 4.3 Add configuration to .env file
+Open the .env file you created and add these lines:
+envSECRET_KEY=your-generated-secret-key-here
 DEBUG=True
+
+**Example .env file:**
+envSECRET_KEY=django-insecure-abcd1234efgh5678ijkl9012mnop3456qrst7890uvwx
+DEBUG=True
+
+**Important Notes:**
+
+Replace your-generated-secret-key-here with the actual key generated in step 4.2
+DEBUG=True enables development mode (never use this in production!)
+Do NOT commit the .env file to version control (it should be in your .gitignore)
 
 #### 5. Database Setup
 python manage.py makemigrations

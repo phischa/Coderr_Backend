@@ -26,7 +26,6 @@ urlpatterns = [
     path('', include(coderr_app_urls)),
     path('api-auth/', include('rest_framework.urls')),
     path('api/', include(coderr_app_urls)),
-    path('api/auth/', include(user_auth_urls)),
 ]
 
 # Serve media files in development

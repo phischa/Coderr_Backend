@@ -145,20 +145,29 @@ class OfferSerializer(serializers.ModelSerializer):
     details = serializers.SerializerMethodField()
     min_price = serializers.ReadOnlyField()
     min_delivery_time = serializers.ReadOnlyField()
+    user_details = serializers.SerializerMethodField()
     
     class Meta:
         model = Offer
         fields = ['id', 'title', 'description', 'image', 'created_at', 'updated_at',
-                    'min_price', 'min_delivery_time', 'details', 'user']
+                    'min_price', 'min_delivery_time', 'details', 'user', 'user_details'] 
     
     def get_details(self, obj):
         return [
             {
                 'id': detail.id,
-                'offer_type': detail.offer_type
+                'url': f'/offerdetails/{detail.id}/'
             }
             for detail in obj.details.all()
         ]
+    
+    def get_user_details(self, obj):
+        """Return user details as per documentation"""
+        return {
+            'first_name': obj.creator.first_name,
+            'last_name': obj.creator.last_name,
+            'username': obj.creator.username
+        }
 
 
 class OfferWithDetailsSerializer(serializers.ModelSerializer):
@@ -196,7 +205,6 @@ class ReviewSerializer(serializers.ModelSerializer):
         return obj.business_user.username
 
 
-
 class OrderSerializer(serializers.ModelSerializer):
     """
     Serializer for Order model.
@@ -214,6 +222,7 @@ class OrderSerializer(serializers.ModelSerializer):
     price = serializers.ReadOnlyField()
     delivery_time_in_days = serializers.ReadOnlyField()
     revisions = serializers.ReadOnlyField()
+    offer_type = serializers.ReadOnlyField()  # ADD THIS LINE - Missing from original
     customer_user = serializers.ReadOnlyField()  # This returns customer.id
     
     class Meta:
@@ -223,19 +232,19 @@ class OrderSerializer(serializers.ModelSerializer):
             'offer_detail_id',      
             'offer_detail',         
             'customer', 
-            'customer_user',        # Add this for frontend compatibility
+            'customer_user',       
             'business_user', 
             'customer_username',
             'business_username',
             'status', 
             'created_at', 
             'updated_at',
-            # Add all the property fields
             'features',
             'title',
             'price',
             'delivery_time_in_days',
-            'revisions'
+            'revisions',
+            'offer_type' 
         ]
         read_only_fields = ['id', 'customer', 'business_user', 'offer_detail', 'created_at', 'updated_at']
     
@@ -252,6 +261,7 @@ class OrderSerializer(serializers.ModelSerializer):
         if not OfferDetail.objects.filter(id=value).exists():
             raise serializers.ValidationError("Invalid offer detail ID")
         return value
+
 
 
 class BaseInfoSerializer(serializers.ModelSerializer):

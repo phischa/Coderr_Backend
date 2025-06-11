@@ -37,6 +37,24 @@ class Offer(models.Model):
     def user(self):
         """Returns the creator's user ID for easy access in API responses"""
         return self.creator.id
+
+    def clean(self):
+        """Validate that offer has exactly 3 details"""
+        super().clean()
+        if self.pk:  # Only validate if object already exists
+            details_count = self.details.count()
+            if details_count != 3:
+                raise ValidationError(
+                    f'Ein Offer muss 3 Details enthalten! Current count: {details_count}'
+                )
+            
+            # Validate that we have one of each type
+            offer_types = set(self.details.values_list('offer_type', flat=True))
+            required_types = {'basic', 'standard', 'premium'}
+            if offer_types != required_types:
+                raise ValidationError(
+                    f'Offer must have exactly one basic, standard, and premium detail. Found: {offer_types}'
+                )
     
     def __str__(self):
         return self.title
@@ -119,6 +137,11 @@ class Order(models.Model):
     def revisions(self):
         """Returns the revisions from the offer detail"""
         return self.offer_detail.revisions
+    
+    @property
+    def offer_type(self):
+        """Returns the offer type from the offer detail"""
+        return self.offer_detail.offer_type
     
     @property
     def customer_user(self):

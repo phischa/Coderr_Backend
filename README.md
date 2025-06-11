@@ -198,5 +198,5 @@ For questions or issues related to this backend:
 * Refer to the project documentation
 * Check the Django admin interface for data inspection
 * Review API endpoints using the browsable API interface
-* Contact the development team or instructors
+* Contact the developer
 For frontend-related questions, please refer to the separate frontend repository documentation.

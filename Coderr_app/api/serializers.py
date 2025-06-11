@@ -156,6 +156,7 @@ class OfferSerializer(serializers.ModelSerializer):
         return [
             {
                 'id': detail.id,
+                'offer_type': detail.offer_type,  # ADD THIS LINE - was missing!
                 'url': f'/offerdetails/{detail.id}/'
             }
             for detail in obj.details.all()
@@ -168,6 +169,7 @@ class OfferSerializer(serializers.ModelSerializer):
             'last_name': obj.creator.last_name,
             'username': obj.creator.username
         }
+
 
 
 class OfferWithDetailsSerializer(serializers.ModelSerializer):

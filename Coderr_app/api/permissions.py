@@ -29,6 +29,7 @@ class IsCustomerUser(BasePermission):
         except Profile.DoesNotExist:
             return False
 
+
 class IsOwnerOrReadOnly(BasePermission):
     """
     Custom permission for offers:
@@ -51,5 +52,13 @@ class IsOwnerOrReadOnly(BasePermission):
     def has_object_permission(self, request, view, obj):
         # For update/delete operations, check ownership
         if view.action in ['update', 'partial_update', 'destroy']:
-            return obj.creator == request.user
+            # Handle different object types
+            if hasattr(obj, 'creator'):
+                return obj.creator == request.user
+            elif hasattr(obj, 'offer') and hasattr(obj.offer, 'creator'):
+                # FIXED: For OfferDetail objects - check the parent offer's creator
+                return obj.offer.creator == request.user
+            else:
+                # If we can't determine ownership, deny access
+                return False
         return True

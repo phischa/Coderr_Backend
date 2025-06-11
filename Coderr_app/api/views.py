@@ -648,6 +648,12 @@ class OrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
+    def get_permissions(self):
+        """Override permissions for custom actions"""
+        if self.action in ['order_count', 'completed_order_count']:
+            return [] 
+        return super().get_permissions()
+
     def destroy(self, request, *args, **kwargs):
         """DELETE /api/orders/{id}/ - Return 204 No Content, 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error"""
         try:
@@ -682,80 +688,133 @@ class OrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
-    @action(detail=False, methods=['GET'], url_path='order-count/(?P<business_user_id>[^/.]+)', permission_classes=[])
+    @action(detail=False, methods=['GET'], url_path='order-count/(?P<business_user_id>[^/.]+)', permission_classes=[AllowAny])
     def order_count(self, request, business_user_id=None):
-        """GET /api/order-count/{business_user_id}/ - Count in-progress orders for a business user"""
+        """
+        GET /api/order-count/{business_user_id}/ - Count in-progress orders for a business user
+        NO AUTH REQUIRED - Not in documentation, so can be public
+        """
         try:
-            # Check if business user exists (no authentication required per documentation)
+            # Validate business_user_id
+            if not business_user_id:
+                return Response(
+                    {'error': 'business_user_id ist erforderlich'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                business_user_id = int(business_user_id)
+            except ValueError:
+                return Response(
+                    {'error': 'Ungültige business_user_id'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if business user exists
             try:
                 business_user = User.objects.get(id=business_user_id)
-                # Verify it's a business user
                 if business_user.profile.type != 'business':
                     return Response(
-                        {'error': 'Kein Geschäftsnutzer mit der angegebenen ID gefunden'}, 
-                        status=status.HTTP_404_NOT_FOUND
+                        {'error': 'Der angegebene Benutzer ist kein Business-Benutzer'}, 
+                        status=status.HTTP_400_BAD_REQUEST
                     )
-            except (User.DoesNotExist, Profile.DoesNotExist):
+            except User.DoesNotExist:
                 return Response(
-                    {'error': 'Kein Geschäftsnutzer mit der angegebenen ID gefunden'}, 
+                    {'error': 'Business-Benutzer nicht gefunden'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            except Profile.DoesNotExist:
+                return Response(
+                    {'error': 'Benutzerprofil nicht gefunden'}, 
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            count = Order.objects.filter(
-                business_user_id=business_user_id,
+            # Count in-progress orders for this business user
+            order_count = Order.objects.filter(
+                business_user=business_user,
                 status='in_progress'
             ).count()
             
-            return Response({'order_count': count}, status=status.HTTP_200_OK)
+            return Response(
+                {'order_count': order_count}, 
+                status=status.HTTP_200_OK
+            )
             
         except Exception as e:
             return Response(
                 {'error': 'Interner Serverfehler'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
-    @action(detail=False, methods=['GET'], url_path='completed-order-count/(?P<business_user_id>[^/.]+)', permission_classes=[])
+
+    @action(detail=False, methods=['GET'], url_path='completed-order-count/(?P<business_user_id>[^/.]+)', permission_classes=[AllowAny])
     def completed_order_count(self, request, business_user_id=None):
-        """GET /api/completed-order-count/{business_user_id}/ - Count completed orders for a business user"""
+        """
+        GET /api/completed-order-count/{business_user_id}/ - Count completed orders for a business user
+        NO AUTH REQUIRED - Not in documentation, so can be public
+        """
         try:
-            # Check if business user exists (no authentication required per documentation)
+            # Validate business_user_id
+            if not business_user_id:
+                return Response(
+                    {'error': 'business_user_id ist erforderlich'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                business_user_id = int(business_user_id)
+            except ValueError:
+                return Response(
+                    {'error': 'Ungültige business_user_id'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if business user exists
             try:
                 business_user = User.objects.get(id=business_user_id)
-                # Verify it's a business user
                 if business_user.profile.type != 'business':
                     return Response(
-                        {'error': 'Kein Geschäftsnutzer mit der angegebenen ID gefunden'}, 
-                        status=status.HTTP_404_NOT_FOUND
+                        {'error': 'Der angegebene Benutzer ist kein Business-Benutzer'}, 
+                        status=status.HTTP_400_BAD_REQUEST
                     )
-            except (User.DoesNotExist, Profile.DoesNotExist):
+            except User.DoesNotExist:
                 return Response(
-                    {'error': 'Kein Geschäftsnutzer mit der angegebenen ID gefunden'}, 
+                    {'error': 'Business-Benutzer nicht gefunden'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            except Profile.DoesNotExist:
+                return Response(
+                    {'error': 'Benutzerprofil nicht gefunden'}, 
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            count = Order.objects.filter(
-                business_user_id=business_user_id,
+            # Count completed orders for this business user
+            completed_order_count = Order.objects.filter(
+                business_user=business_user,
                 status='completed'
             ).count()
             
-            return Response({'completed_order_count': count}, status=status.HTTP_200_OK)
+            return Response(
+                {'completed_order_count': completed_order_count}, 
+                status=status.HTTP_200_OK
+            )
             
         except Exception as e:
             return Response(
                 {'error': 'Interner Serverfehler'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
 
 
 class ReviewViewSet(viewsets.ModelViewSet):
     """API endpoint for reviews matching documentation exactly"""
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
-    permission_classes = [IsAuthenticated]  # Changed: Documentation says "authenticated user can read"
+    permission_classes = [IsAuthenticated]
     pagination_class = None
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['business_user', 'reviewer']
-    ordering_fields = ['updated_at', 'rating']  # Only these two as per documentation
+    ordering_fields = ['updated_at', 'rating']  
     
     def get_queryset(self):
         """
@@ -965,69 +1024,121 @@ class ReviewViewSet(viewsets.ModelViewSet):
                 {'error': 'Interner Serverfehler'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
-    # Keep existing custom actions for backward compatibility
-    @action(detail=False, methods=['GET'], url_path='business/(?P<business_user_id>[^/.]+)')
+
+    def get_permissions(self):
+        """Override permissions for custom actions"""
+        if self.action in ['business_reviews', 'reviewer_reviews']:
+            return [] 
+        return super().get_permissions()
+
+    @action(detail=False, methods=['GET'], url_path='business/(?P<business_user_id>[^/.]+)', permission_classes=[AllowAny])
     def business_reviews(self, request, business_user_id=None):
         """
-        Get all reviews for a specific business user.
-        URL: /api/reviews/business/{business_user_id}/
+        Get all reviews for a specific business user
+        NO AUTH REQUIRED - Not in documentation, so can be public
+        Return: 200 OK, 404 Not Found, 400 Bad Request
         """
         try:
-            business_user = User.objects.get(id=business_user_id)
-            # Verify it's actually a business user
-            if business_user.profile.type != 'business':
+            # Validate business_user_id
+            if not business_user_id:
                 return Response(
-                    {'error': 'User is not a business user'}, 
+                    {'error': 'business_user_id ist erforderlich'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
-        except User.DoesNotExist:
+            
+            try:
+                business_user_id = int(business_user_id)
+            except ValueError:
+                return Response(
+                    {'error': 'Ungültige business_user_id'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if business user exists and is actually a business user
+            try:
+                business_user = User.objects.get(id=business_user_id)
+                if business_user.profile.type != 'business':
+                    return Response(
+                        {'error': 'Der angegebene Benutzer ist kein Business-Benutzer'}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except User.DoesNotExist:
+                return Response(
+                    {'error': 'Business-Benutzer nicht gefunden'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            except Profile.DoesNotExist:
+                return Response(
+                    {'error': 'Benutzerprofil nicht gefunden'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get reviews for this business user
+            reviews = Review.objects.filter(business_user=business_user)
+            serializer = self.get_serializer(reviews, many=True)
+            
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
             return Response(
-                {'error': 'Business user not found'}, 
-                status=status.HTTP_404_NOT_FOUND
+                {'error': 'Interner Serverfehler'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
-        # Get reviews for this business user
-        reviews = Review.objects.filter(business_user_id=business_user_id)
-        
-        # Apply ordering
-        ordering = request.query_params.get('ordering', '-updated_at')
-        if ordering:
-            reviews = reviews.order_by(ordering)
-        
-        serializer = self.get_serializer(reviews, many=True)
-        return Response(serializer.data)
-    
-    @action(detail=False, methods=['GET'], url_path='reviewer/(?P<reviewer_id>[^/.]+)')
+
+    @action(detail=False, methods=['GET'], url_path='reviewer/(?P<reviewer_id>[^/.]+)', permission_classes=[])
     def reviewer_reviews(self, request, reviewer_id=None):
         """
-        Get all reviews by a specific reviewer (customer).
-        URL: /api/reviews/reviewer/{reviewer_id}/
+        Get all reviews by a specific reviewer
+        NO AUTH REQUIRED - Not in documentation, so can be public
+        Return: 200 OK, 404 Not Found, 400 Bad Request
         """
         try:
-            reviewer = User.objects.get(id=reviewer_id)
-            # Verify it's actually a customer user
-            if reviewer.profile.type != 'customer':
+            # Validate reviewer_id
+            if not reviewer_id:
                 return Response(
-                    {'error': 'User is not a customer user'}, 
+                    {'error': 'reviewer_id ist erforderlich'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
-        except User.DoesNotExist:
+            
+            try:
+                reviewer_id = int(reviewer_id)
+            except ValueError:
+                return Response(
+                    {'error': 'Ungültige reviewer_id'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if reviewer exists and is actually a customer user
+            try:
+                reviewer = User.objects.get(id=reviewer_id)
+                if reviewer.profile.type != 'customer':
+                    return Response(
+                        {'error': 'Der angegebene Benutzer ist kein Customer-Benutzer'}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except User.DoesNotExist:
+                return Response(
+                    {'error': 'Reviewer nicht gefunden'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            except Profile.DoesNotExist:
+                return Response(
+                    {'error': 'Benutzerprofil nicht gefunden'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get reviews by this reviewer
+            reviews = Review.objects.filter(reviewer=reviewer)
+            serializer = self.get_serializer(reviews, many=True)
+            
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
             return Response(
-                {'error': 'Reviewer not found'}, 
-                status=status.HTTP_404_NOT_FOUND
+                {'error': 'Interner Serverfehler'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
-        # Get reviews by this reviewer
-        reviews = Review.objects.filter(reviewer_id=reviewer_id)
-        
-        # Apply ordering
-        ordering = request.query_params.get('ordering', '-updated_at')
-        if ordering:
-            reviews = reviews.order_by(ordering)
-        
-        serializer = self.get_serializer(reviews, many=True)
-        return Response(serializer.data)
+
 
 
 class ProfileViewSet(viewsets.ModelViewSet):

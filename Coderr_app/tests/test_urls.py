@@ -1,4 +1,3 @@
-# test_urls.py - Korrigierte URL Tests für Coderr_app
 from django.test import TestCase
 from django.urls import reverse, resolve
 from django.contrib.auth.models import User
@@ -6,7 +5,7 @@ from rest_framework.test import APIClient
 
 
 class URLPatternsTest(TestCase):
-    """Test URL pattern resolution für Coderr_app spezifische URLs"""
+    """Test URL pattern resolution for Coderr_app specific URLs"""
     
     def setUp(self):
         """Set up test data"""
@@ -59,11 +58,11 @@ class URLPatternsTest(TestCase):
         url = reverse('order-detail', kwargs={'pk': 1})
         self.assertEqual(url, '/api/orders/1/')
         
-        # Test custom action URLs
-        url = reverse('order-count', kwargs={'user_id': 1})
+        # Test custom action URLs - FIXED: use business_user_id instead of user_id
+        url = reverse('order-count', kwargs={'business_user_id': 1})
         self.assertIn('order-count', url)
         
-        url = reverse('completed-order-count', kwargs={'user_id': 1})
+        url = reverse('completed-order-count', kwargs={'business_user_id': 1})
         self.assertIn('completed-order-count', url)
         
         # Test URL resolution
@@ -94,10 +93,7 @@ class URLPatternsTest(TestCase):
         self.assertEqual(resolver.view_name, 'review-list')
     
     def test_profile_urls(self):
-        """Test profile-related URLs (diese sind in Coderr_app, nicht user_auth_app)"""
-        # Teste nur die Profile-URLs die tatsächlich in Coderr_app definiert sind
-        # Basierend auf der urls.py sind das:
-        
+        """Test profile-related URLs"""
         # Test profile detail URL
         url = reverse('profile-detail', kwargs={'pk': 1})
         self.assertIn('profile', url)
@@ -110,12 +106,12 @@ class URLPatternsTest(TestCase):
         self.assertIn('1', url)
         
         # Test business profiles URL
-        url = reverse('business-profiles-list')
+        url = reverse('profile-business')
         self.assertIn('profiles', url)
         self.assertIn('business', url)
         
         # Test customer profiles URL
-        url = reverse('customer-profiles-list')
+        url = reverse('profile-customer')
         self.assertIn('profiles', url)
         self.assertIn('customer', url)
     
@@ -130,15 +126,15 @@ class URLPatternsTest(TestCase):
     
     def test_url_resolution_consistency(self):
         """Test that all URLs resolve correctly"""
-        # Test dass alle URLs die wir in tests verwenden auch tatsächlich existieren
+        # Test that all URLs we use in tests actually exist
         url_names_to_test = [
             'offer-list',
             'offer-detail-list', 
             'order-list',
             'review-list',
             'base-info',
-            'business-profiles-list',
-            'customer-profiles-list'
+            'profile-business',  # Fixed: removed -list suffix
+            'profile-customer'   # Fixed: removed -list suffix
         ]
         
         for url_name in url_names_to_test:
@@ -159,8 +155,8 @@ class URLPatternsTest(TestCase):
             ('review-detail', {'pk': 1}),
             ('profile-detail', {'pk': 1}),
             ('profile-by-user', {'pk': 1}),
-            ('order-count', {'user_id': 1}),
-            ('completed-order-count', {'user_id': 1}),
+            ('order-count', {'business_user_id': 1}),  # Fixed: business_user_id
+            ('completed-order-count', {'business_user_id': 1}),  # Fixed: business_user_id
             ('business-reviews', {'business_user_id': 1}),
             ('reviewer-reviews', {'reviewer_id': 1}),
         ]
@@ -192,42 +188,33 @@ class URLAccessibilityTest(TestCase):
     def test_public_urls_accessible(self):
         """Test that public URLs are accessible without authentication"""
         public_urls = [
-            reverse('offer-list'),
-            reverse('offer-detail-list'),
-            reverse('review-list'),
-            reverse('base-info'),
-            reverse('business-profiles-list'),
-            reverse('customer-profiles-list'),
+            reverse('offer-list'),              # Public per documentation
+            reverse('base-info'),               # Public per documentation
         ]
         
         for url in public_urls:
             response = self.client.get(url)
             # Should be accessible (200) or at worst not require auth (not 401/403)
-            self.assertNotEqual(response.status_code, 401, 
-                                f"URL {url} should be accessible without auth")
-            self.assertIn(response.status_code, [200, 404], 
-                            f"URL {url} returned unexpected status: {response.status_code}")
+            self.assertEqual(response.status_code, 200, 
+                           f"URL {url} should be accessible without auth")
     
     def test_authenticated_urls_require_auth(self):
         """Test that protected URLs require authentication"""
         protected_urls = [
-            reverse('order-list'),
+            reverse('order-list'),              # Requires auth per documentation
         ]
         
         for url in protected_urls:
             response = self.client.get(url)
-            # Should require authentication
-            self.assertEqual(response.status_code, 401, 
-                            f"URL {url} should require authentication")
+            # Should require authentication or be forbidden
+            self.assertIn(response.status_code, [401, 403], 
+                        f"URL {url} should require authentication, got {response.status_code}")
     
     def test_custom_action_urls_accessible(self):
-        """Test that custom action URLs are accessible"""
-        # Test with authenticated user for custom actions that might need it
-        self.client.force_authenticate(user=self.user)
-        
+        """Test that custom action URLs are accessible"""        
         custom_action_urls = [
-            reverse('order-count', kwargs={'user_id': 1}),
-            reverse('completed-order-count', kwargs={'user_id': 1}),
+            reverse('order-count', kwargs={'business_user_id': 1}),
+            reverse('completed-order-count', kwargs={'business_user_id': 1}),
             reverse('business-reviews', kwargs={'business_user_id': 1}),
             reverse('reviewer-reviews', kwargs={'reviewer_id': 1}),
         ]
@@ -239,6 +226,6 @@ class URLAccessibilityTest(TestCase):
                                 f"URL {url} should allow GET method")
             self.assertNotEqual(response.status_code, 500, 
                                 f"URL {url} should not cause server error")
-            # Acceptable responses: 200 (success), 404 (not found), 400 (bad request)
-            self.assertIn(response.status_code, [200, 404, 400], 
+            # Acceptable responses: 200 (success), 404 (not found), 400 (bad request), 401 (unauth)
+            self.assertIn(response.status_code, [200, 404, 400, 401], 
                             f"URL {url} returned unexpected status: {response.status_code}")

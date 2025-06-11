@@ -12,7 +12,8 @@ import uuid
 from user_auth_app.models import Profile
 from .serializers import (
     UserSerializer, ProfileSerializer, ProfileUpdateSerializer,
-    RegistrationSerializer, LoginSerializer
+    RegistrationSerializer, LoginSerializer, CustomerProfileSerializer, 
+    BusinessProfileSerializer
 )
 
 
@@ -178,6 +179,36 @@ class ProfileViewSet(viewsets.ModelViewSet):
         if self.action in ['update', 'partial_update']:
             return ProfileUpdateSerializer
         return ProfileSerializer
+
+    @action(detail=False, methods=['GET'], url_path='business')
+    def business_profiles(self, request):
+        """
+        List all business profiles.
+        
+        Args:
+            request: HTTP request
+            
+        Returns:
+            List of business profiles matching documentation format
+        """
+        profiles = Profile.objects.filter(type='business')
+        serializer = BusinessProfileSerializer(profiles, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['GET'], url_path='customer')
+    def customer_profiles(self, request):
+        """
+        List all customer profiles.
+        
+        Args:
+            request: HTTP request
+            
+        Returns:
+            List of customer profiles matching documentation format
+        """
+        profiles = Profile.objects.filter(type='customer')
+        serializer = CustomerProfileSerializer(profiles, many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['GET', 'PATCH'], url_path='by-user')
     def get_by_user_id(self, request, pk=None):

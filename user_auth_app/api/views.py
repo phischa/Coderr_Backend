@@ -63,6 +63,7 @@ def login_view(request):
                     'token': token.key,
                     'user_id': user.id,
                     'username': user.username,
+                    'email': user.email,
                     'type': user.profile.type,
                     'is_guest': user.profile.is_guest
                 })
@@ -96,6 +97,7 @@ def handle_guest_login(request, guest_type):
                 'token': token.key,
                 'user_id': guest_user.id,
                 'username': guest_user.username,
+                'email': guest_user.email,  
                 'type': guest_type,
                 'is_guest': True,
                 'message': 'Existing guest session retrieved'
@@ -123,6 +125,7 @@ def handle_guest_login(request, guest_type):
         'token': token.key,
         'user_id': guest_user.id,
         'username': guest_username,
+        'email': guest.email,  
         'type': guest_type,
         'is_guest': True,
         'message': 'New guest user created'
@@ -154,6 +157,7 @@ def registration_view(request):
             'token': token.key,
             'user_id': user.id,
             'username': user.username,
+            'email': user.email,
             'type': profile_type,
             'is_guest': False
         })

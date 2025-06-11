@@ -337,3 +337,4 @@ class PermissionExceptionHandlingTestFixed(TestCase):
             
             result = self.customer_permission.has_permission(request, None)
             self.assertFalse(result)
+            

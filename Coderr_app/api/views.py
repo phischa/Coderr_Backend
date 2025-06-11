@@ -24,21 +24,46 @@ from .permissions import IsBusinessUser, IsCustomerUser, IsOwnerOrReadOnly
 
 @api_view(['GET'])
 def base_info_view(request):
-    """Return site statistics matching the frontend element IDs"""
-    info = BaseInfo.get_or_create_singleton()
+    """
+    GET /api/base-info/
     
-    business_profile_count = Profile.objects.filter(type='business').count()
-    avg_rating = Review.objects.aggregate(Avg('rating'))
-    average_rating = round(avg_rating['rating__avg'], 1) if avg_rating['rating__avg'] is not None else 0
+    Ruft allgemeine Basisinformationen zur Plattform ab, einschließlich der Anzahl 
+    der Bewertungen, des durchschnittlichen Bewertungsergebnisses, der Anzahl der 
+    Geschäftsnutzer und der Anzahl der Angebote.
+    
+    Status Codes:
+    - 200: Die Basisinformationen wurden erfolgreich abgerufen
+    - 500: Interner Serverfehler
+    
+    No Permissions required
+    """
+    try:
+        # Update stats to ensure we have current data
+        info = BaseInfo.update_stats()
+        
+        # Calculate business profile count in real-time for accuracy
+        business_profile_count = Profile.objects.filter(type='business').count()
+        
+        # Calculate average rating based on all reviews, rounded to 1 decimal place
+        avg_rating = Review.objects.aggregate(Avg('rating'))
+        average_rating = round(avg_rating['rating__avg'], 1) if avg_rating['rating__avg'] is not None else 0.0
 
-    formatted_data = {
-        'offer_count': info.total_offers,
-        'review_count': info.total_reviews,
-        'business_profile_count': business_profile_count,
-        'average_rating': average_rating
-    }
-    
-    return Response(formatted_data)
+        # Format response exactly as per documentation
+        formatted_data = {
+            'review_count': info.total_reviews,
+            'average_rating': average_rating,
+            'business_profile_count': business_profile_count,
+            'offer_count': info.total_offers
+        }
+        
+        return Response(formatted_data, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        # Handle any internal server errors
+        return Response(
+            {'error': 'Interner Serverfehler'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 class OfferViewSet(viewsets.ModelViewSet):
@@ -723,52 +748,225 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 
 class ReviewViewSet(viewsets.ModelViewSet):
-    """API endpoint for reviews"""
+    """API endpoint for reviews matching documentation exactly"""
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticated]  # Changed: Documentation says "authenticated user can read"
     pagination_class = None
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['reviewer', 'business_user']  # Behalten wir für Rückwärtskompatibilität
-    ordering_fields = ['created_at', 'updated_at', 'rating']
+    filterset_fields = ['business_user', 'reviewer']
+    ordering_fields = ['updated_at', 'rating']  # Only these two as per documentation
     
     def get_queryset(self):
         """
-        Custom queryset filtering to support both:
-        - Standard DjangoFilter: ?business_user=X&reviewer=Y
-        - Frontend convention: ?business_user_id=X&reviewer_id=Y
+        Custom queryset filtering to support documentation parameters:
+        - business_user_id: Filter reviews for specific business user
+        - reviewer_id: Filter reviews by specific reviewer
+        - ordering: Sort by 'updated_at' or 'rating'
         """
         queryset = Review.objects.all()
         
-        # Frontend-Style Parameter (mit _id Suffix)
+        # Filter by business_user_id
         business_user_id = self.request.query_params.get('business_user_id')
-        reviewer_id = self.request.query_params.get('reviewer_id')
-        
-        # Standard DjangoFilter Parameter (ohne _id Suffix) - für Rückwärtskompatibilität
-        business_user = self.request.query_params.get('business_user')
-        reviewer = self.request.query_params.get('reviewer')
-        
-        # Filter für business_user (Frontend hat Priorität)
         if business_user_id is not None:
-            queryset = queryset.filter(business_user_id=business_user_id)
-        elif business_user is not None:
-            queryset = queryset.filter(business_user_id=business_user)
+            try:
+                business_user_id = int(business_user_id)
+                queryset = queryset.filter(business_user_id=business_user_id)
+            except ValueError:
+                raise ValidationError({'business_user_id': 'Must be a valid integer'})
         
-        # Filter für reviewer (Frontend hat Priorität)
+        # Filter by reviewer_id  
+        reviewer_id = self.request.query_params.get('reviewer_id')
         if reviewer_id is not None:
-            queryset = queryset.filter(reviewer_id=reviewer_id)
-        elif reviewer is not None:
-            queryset = queryset.filter(reviewer_id=reviewer)
+            try:
+                reviewer_id = int(reviewer_id)
+                queryset = queryset.filter(reviewer_id=reviewer_id)
+            except ValueError:
+                raise ValidationError({'reviewer_id': 'Must be a valid integer'})
         
-        # Sortierung anwenden
+        # Apply ordering
         ordering = self.request.query_params.get('ordering')
         if ordering:
-            queryset = queryset.order_by(ordering)
+            if ordering in ['updated_at', '-updated_at', 'rating', '-rating']:
+                queryset = queryset.order_by(ordering)
+            else:
+                raise ValidationError({'ordering': 'Must be "updated_at" or "rating"'})
         else:
-            queryset = queryset.order_by('-updated_at')  # Standard-Sortierung
+            queryset = queryset.order_by('-updated_at')  # Default ordering
             
         return queryset
     
+    def list(self, request, *args, **kwargs):
+        """GET /api/reviews/ - Return 200 OK, 401 Unauthorized, 500 Internal Server Error"""
+        try:
+            if not request.user.is_authenticated:
+                return Response(
+                    {'error': 'Der Benutzer muss authentifiziert sein'}, 
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            queryset = self.get_queryset()
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            return Response(
+                {'error': str(e.detail) if hasattr(e, 'detail') else str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {'error': 'Interner Serverfehler'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def create(self, request, *args, **kwargs):
+        """POST /api/reviews/ - Return 201 Created, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 500 Internal Server Error"""
+        try:
+            # Check authentication
+            if not request.user.is_authenticated:
+                return Response(
+                    {'error': 'Der Benutzer muss authentifiziert sein'}, 
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            # Check if user has customer profile
+            try:
+                user_profile = request.user.profile
+                if user_profile.type != 'customer':
+                    return Response(
+                        {'error': 'Der Benutzer muss authentifiziert sein und ein Kundenprofil besitzen'}, 
+                        status=status.HTTP_401_UNAUTHORIZED
+                    )
+            except Profile.DoesNotExist:
+                return Response(
+                    {'error': 'Der Benutzer muss authentifiziert sein und ein Kundenprofil besitzen'}, 
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            # Validate request data
+            serializer = self.get_serializer(data=request.data)
+            if not serializer.is_valid():
+                return Response(
+                    {'error': 'Fehlerhafte Anfrage', 'details': serializer.errors}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if user already has a review for this business user
+            business_user_id = request.data.get('business_user')
+            if business_user_id:
+                existing_review = Review.objects.filter(
+                    reviewer=request.user, 
+                    business_user_id=business_user_id
+                ).first()
+                if existing_review:
+                    return Response(
+                        {'error': 'Ein Benutzer kann nur eine Bewertung pro Geschäftsprofil abgeben'}, 
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            
+            # Create the review
+            review = serializer.save(reviewer=request.user)
+            BaseInfo.update_stats()
+            
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            return Response(
+                {'error': 'Interner Serverfehler'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def partial_update(self, request, *args, **kwargs):
+        """PATCH /api/reviews/{id}/ - Return 200 OK, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found"""
+        try:
+            # Check authentication
+            if not request.user.is_authenticated:
+                return Response(
+                    {'error': 'Der Benutzer muss authentifiziert sein'}, 
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            # Get review
+            try:
+                review = self.get_object()
+            except Http404:
+                return Response(
+                    {'error': 'Es wurde keine Bewertung mit der angegebenen ID gefunden'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Check ownership
+            if review.reviewer != request.user:
+                return Response(
+                    {'error': 'Der Benutzer ist nicht berechtigt, diese Bewertung zu bearbeiten'}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Only allow rating and description to be updated
+            allowed_fields = {'rating', 'description'}
+            provided_fields = set(request.data.keys())
+            invalid_fields = provided_fields - allowed_fields
+            
+            if invalid_fields:
+                return Response(
+                    {'error': 'Der Anfrage-Body enthält ungültige Daten'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Validate and update
+            serializer = self.get_serializer(review, data=request.data, partial=True)
+            if not serializer.is_valid():
+                return Response(
+                    {'error': 'Der Anfrage-Body enthält ungültige Daten', 'details': serializer.errors}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response(
+                {'error': 'Interner Serverfehler'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def destroy(self, request, *args, **kwargs):
+        """DELETE /api/reviews/{id}/ - Return 204 No Content, 401 Unauthorized, 403 Forbidden, 404 Not Found"""
+        try:
+            # Check authentication
+            if not request.user.is_authenticated:
+                return Response(
+                    {'error': 'Der Benutzer muss authentifiziert sein'}, 
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            # Get review
+            try:
+                review = self.get_object()
+            except Http404:
+                return Response(
+                    {'error': 'Es wurde keine Bewertung mit der angegebenen ID gefunden'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Check ownership
+            if review.reviewer != request.user:
+                return Response(
+                    {'error': 'Der Benutzer ist nicht berechtigt, diese Bewertung zu löschen'}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            review.delete()
+            BaseInfo.update_stats()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+            
+        except Exception as e:
+            return Response(
+                {'error': 'Interner Serverfehler'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    # Keep existing custom actions for backward compatibility
     @action(detail=False, methods=['GET'], url_path='business/(?P<business_user_id>[^/.]+)')
     def business_reviews(self, request, business_user_id=None):
         """
@@ -830,27 +1028,6 @@ class ReviewViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(reviews, many=True)
         return Response(serializer.data)
-    
-    def perform_create(self, serializer):
-        # Check if user is a customer (including guest customers)
-        try:
-            user_profile = self.request.user.profile
-            if user_profile.type != 'customer':
-                raise PermissionDenied("Only customers can submit reviews")
-            # No restriction on guest status - both regular and guest customers can create reviews
-        except Profile.DoesNotExist:
-            raise PermissionDenied("User profile not found")
-            
-        serializer.save(reviewer=self.request.user)
-        BaseInfo.update_stats()
-    
-    def perform_destroy(self, instance):
-        # Check if the user owns this review
-        if instance.reviewer != self.request.user:
-            raise PermissionDenied("You can only delete your own reviews")
-            
-        super().perform_destroy(instance)
-        BaseInfo.update_stats()
 
 
 class ProfileViewSet(viewsets.ModelViewSet):

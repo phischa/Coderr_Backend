@@ -185,6 +185,7 @@ class OfferWithDetailsSerializer(serializers.ModelSerializer):
                     'min_price', 'min_delivery_time', 'details', 'user']
 
 
+
 class ReviewSerializer(serializers.ModelSerializer):
     """
     Serializer for Review model.
@@ -203,6 +204,25 @@ class ReviewSerializer(serializers.ModelSerializer):
     
     def get_business_user_username(self, obj):
         return obj.business_user.username
+    
+    def validate_business_user(self, value):
+        """Validate that the business_user exists and is actually a business user"""
+        try:
+            user = User.objects.get(id=value.id)
+            profile = user.profile
+            if profile.type != 'business':
+                raise serializers.ValidationError("The specified user is not a business user")
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Business user does not exist")
+        except Profile.DoesNotExist:
+            raise serializers.ValidationError("User profile does not exist")
+        return value
+    
+    def validate_rating(self, value):
+        """Validate rating is between 1 and 5"""
+        if value < 1 or value > 5:
+            raise serializers.ValidationError("Rating must be between 1 and 5")
+        return value
 
 
 class OrderSerializer(serializers.ModelSerializer):

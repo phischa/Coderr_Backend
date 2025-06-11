@@ -173,7 +173,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
     """
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticated]
     
     def get_serializer_class(self):
         if self.action in ['update', 'partial_update']:

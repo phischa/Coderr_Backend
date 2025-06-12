@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 import uuid
 
 from user_auth_app.models import Profile
+from user_auth_app.api.permissions import IsProfileOwner  # Import custom permission
 from .serializers import (
     UserSerializer, ProfileSerializer, ProfileUpdateSerializer,
     RegistrationSerializer, LoginSerializer, CustomerProfileSerializer, 
@@ -126,7 +127,7 @@ def handle_guest_login(request, guest_type):
         'token': token.key,
         'user_id': guest_user.id,
         'username': guest_username,
-        'email': guest.email,  
+        'email': guest_user.email,  # Fixed typo: was 'guest.email'
         'type': guest_type,
         'is_guest': True,
         'message': 'New guest user created'
@@ -169,27 +170,85 @@ def registration_view(request):
 class ProfileViewSet(viewsets.ModelViewSet):
     """
     API endpoint for user profiles.
-    Provides CRUD operations for user profiles.
+    Provides CRUD operations for user profiles with proper permission checks.
     """
     queryset = Profile.objects.all()
     serializer_class = ProfileSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsProfileOwner]  # Added IsProfileOwner
     
     def get_serializer_class(self):
+        """Return appropriate serializer based on action"""
         if self.action in ['update', 'partial_update']:
             return ProfileUpdateSerializer
         return ProfileSerializer
+
+    def get_object(self):
+        """
+        Override to get profile by user_id when pk represents user_id.
+        This ensures the API works with user IDs as documented.
+        """
+        pk = self.kwargs.get('pk')
+        
+        # For profile-specific endpoints, pk is the user_id
+        if self.action in ['retrieve', 'update', 'partial_update', 'destroy']:
+            return get_object_or_404(Profile, user_id=pk)
+        
+        return super().get_object()
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        GET /api/profile/{pk}/ - Get profile by user ID
+        
+        Returns profile data with all fields as non-null strings
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+    def partial_update(self, request, *args, **kwargs):
+        """
+        PATCH /api/profile/{pk}/ - Update profile by user ID
+        
+        Enforces ownership check and returns proper status codes:
+        - 200: Success
+        - 401: Not authenticated
+        - 403: Not the owner of the profile
+        - 404: Profile not found
+        """
+        instance = self.get_object()
+        
+        # Check ownership (this is also done by IsProfileOwner permission)
+        # but we want to be explicit about guest users
+        if request.user.profile.is_guest:
+            return Response(
+                {'error': 'Guest users cannot update profiles'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # The permission class handles the ownership check
+        # but we can add an explicit check if needed
+        if instance.user != request.user:
+            return Response(
+                {'error': 'You can only update your own profile'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        if serializer.is_valid():
+            self.perform_update(serializer)
+            # Return the full profile data after update
+            response_serializer = ProfileSerializer(instance)
+            return Response(response_serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['GET'], url_path='business')
     def business_profiles(self, request):
         """
         List all business profiles.
         
-        Args:
-            request: HTTP request
-            
         Returns:
-            List of business profiles matching documentation format
+            List of business profiles with all fields as non-null strings
         """
         profiles = Profile.objects.filter(type='business')
         serializer = BusinessProfileSerializer(profiles, many=True)
@@ -200,11 +259,8 @@ class ProfileViewSet(viewsets.ModelViewSet):
         """
         List all customer profiles.
         
-        Args:
-            request: HTTP request
-            
         Returns:
-            List of customer profiles matching documentation format
+            List of customer profiles with all fields as non-null strings
         """
         profiles = Profile.objects.filter(type='customer')
         serializer = CustomerProfileSerializer(profiles, many=True)
@@ -213,7 +269,8 @@ class ProfileViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['GET', 'PATCH'], url_path='by-user')
     def get_by_user_id(self, request, pk=None):
         """
-        Get profile by user ID instead of profile ID.
+        Alternative endpoint: Get/update profile by user ID.
+        Kept for backward compatibility.
         
         Args:
             request: HTTP request
@@ -238,57 +295,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
             serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
-                return Response(serializer.data)
+                # Return full profile data
+                response_serializer = ProfileSerializer(profile)
+                return Response(response_serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    @action(detail=False, methods=['GET'], url_path='business')
-    def business_profiles(self, request):
-        """
-        List all business profiles.
-        
-        Args:
-            request: HTTP request
-            
-        Returns:
-            List of business profiles
-        """
-        profiles = Profile.objects.filter(type='business')
-        serializer = self.get_serializer(profiles, many=True)
-        return Response(serializer.data)
-    
-    @action(detail=False, methods=['GET'], url_path='customer')
-    def customer_profiles(self, request):
-        """
-        List all customer profiles.
-        
-        Args:
-            request: HTTP request
-            
-        Returns:
-            List of customer profiles
-        """
-        profiles = Profile.objects.filter(type='customer')
-        serializer = self.get_serializer(profiles, many=True)
-        return Response(serializer.data)
-
-
-# Optional: Keep GuestLoginView for backward compatibility or direct guest login
-class GuestLoginView(APIView):
-    """
-    Direct guest login endpoint (optional - kept for backward compatibility).
-    The main guest login is now handled through the unified login_view.
-    """
-    permission_classes = [AllowAny]
-    
-    def post(self, request):
-        """
-        Process a direct guest login request.
-        """
-        guest_type = request.data.get('type', 'customer')
-        
-        if guest_type not in ['business', 'customer']:
-            return Response({
-                'error': 'Invalid guest type. Must be "business" or "customer".'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        return handle_guest_login(request, guest_type)

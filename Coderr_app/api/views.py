@@ -1,69 +1,97 @@
 import traceback
+import django_filters
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.db.models import Q, Count, Avg
+from django.db import IntegrityError
 from django.http import Http404
-from rest_framework import viewsets, status, filters, serializers
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
+from rest_framework.permissions import (
+    IsAuthenticated,
+    IsAuthenticatedOrReadOnly,
+    AllowAny,
+)
+from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 
 from user_auth_app.models import Profile
-from Coderr_app.models import (
-    Offer, OfferDetail, Feature, Order, Review, BaseInfo
-)
+from Coderr_app.models import Offer, OfferDetail, Feature, Order, Review, BaseInfo
 from .serializers import (
-    OfferSerializer, OfferWithDetailsSerializer, OfferDetailSerializer, 
-    ReviewSerializer, OrderSerializer, BaseInfoSerializer,
-    ProfileSerializer, ProfileUpdateSerializer
+    OfferSerializer,
+    OfferWithDetailsSerializer,
+    OfferDetailSerializer,
+    ReviewSerializer,
+    OrderSerializer,
+    BaseInfoSerializer,
 )
-from .permissions import IsBusinessUser, IsCustomerUser, IsOwnerOrReadOnly
+from .permissions import (
+    IsBusinessUser,
+    IsCustomerUser,
+    IsOwnerOrReadOnly,
+    OfferDetailPermission,
+)
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 def base_info_view(request):
     """
     GET /api/base-info/
-    
-    Ruft allgemeine Basisinformationen zur Plattform ab, einschließlich der Anzahl 
-    der Bewertungen, des durchschnittlichen Bewertungsergebnisses, der Anzahl der 
-    Geschäftsnutzer und der Anzahl der Angebote.
-    
-    Status Codes:
-    - 200: Die Basisinformationen wurden erfolgreich abgerufen
-    - 500: Interner Serverfehler
-    
+
     No Permissions required
     """
     try:
         # Update stats to ensure we have current data
         info = BaseInfo.update_stats()
-        
+
         # Calculate business profile count in real-time for accuracy
-        business_profile_count = Profile.objects.filter(type='business').count()
-        
+        business_profile_count = Profile.objects.filter(type="business").count()
+
         # Calculate average rating based on all reviews, rounded to 1 decimal place
-        avg_rating = Review.objects.aggregate(Avg('rating'))
-        average_rating = round(avg_rating['rating__avg'], 1) if avg_rating['rating__avg'] is not None else 0.0
+        avg_rating = Review.objects.aggregate(Avg("rating"))
+        average_rating = (
+            round(avg_rating["rating__avg"], 1)
+            if avg_rating["rating__avg"] is not None
+            else 0.0
+        )
 
         # Format response exactly as per documentation
         formatted_data = {
-            'review_count': info.total_reviews,
-            'average_rating': average_rating,
-            'business_profile_count': business_profile_count,
-            'offer_count': info.total_offers
+            "review_count": info.total_reviews,
+            "average_rating": average_rating,
+            "business_profile_count": business_profile_count,
+            "offer_count": info.total_offers,
         }
-        
+
         return Response(formatted_data, status=status.HTTP_200_OK)
-        
+
     except Exception as e:
         # Handle any internal server errors
         return Response(
-            {'error': 'Interner Serverfehler'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            {"error": "Interner Serverfehler"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+class OfferFilter(django_filters.FilterSet):
+    """Custom filter to map creator_id to creator field"""
+    creator_id = django_filters.NumberFilter(field_name='creator', lookup_expr='exact')
+    
+    class Meta:
+        model = Offer
+        fields = []
+
+
+class DynamicPageNumberPagination(PageNumberPagination):
+    """
+    Custom pagination that allows page_size to be set via query parameter
+    as mentioned in the documentation
+    """
+    page_size = 6  # Default aus settings.py
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 
 class OfferViewSet(viewsets.ModelViewSet):
@@ -71,15 +99,19 @@ class OfferViewSet(viewsets.ModelViewSet):
     queryset = Offer.objects.all()
     serializer_class = OfferSerializer
     permission_classes = [IsOwnerOrReadOnly]
+    pagination_class = DynamicPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['creator']
+    filterset_class = OfferFilter
     search_fields = ['title', 'description']
-    ordering_fields = ['created_at', 'updated_at', 'min_price', 'min_delivery_time']
+    ordering_fields = ['updated_at', 'min_price']
     
     def get_serializer_class(self):
-        if self.action in ['retrieve']:
-            return OfferWithDetailsSerializer
-        return OfferSerializer
+        """
+        Choose serializer based on operation:
+        - All operations use OfferSerializer for input/validation
+        - Responses use different serializers where needed
+        """
+        return OfferSerializer  # Always use OfferSerializer for input validation
     
     def list(self, request, *args, **kwargs):
         """GET /api/offers/ - Return 200 OK, 400 Bad Request, 500 Internal Server Error"""
@@ -106,40 +138,6 @@ class OfferViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
-    def validate_query_parameters(self, request):
-        """Validate query parameters as per documentation"""
-        creator_id = request.query_params.get('creator_id')
-        if creator_id:
-            try:
-                int(creator_id)
-            except ValueError:
-                raise ValidationError({'creator_id': 'Must be a valid integer'})
-        
-        min_price = request.query_params.get('min_price')
-        if min_price:
-            try:
-                float(min_price)
-            except ValueError:
-                raise ValidationError({'min_price': 'Must be a valid number'})
-        
-        max_delivery_time = request.query_params.get('max_delivery_time')
-        if max_delivery_time:
-            try:
-                max_days = int(max_delivery_time)
-                if max_days < 0:
-                    raise ValidationError({'max_delivery_time': 'Must be a positive integer'})
-            except ValueError:
-                raise ValidationError({'max_delivery_time': 'Must be a valid integer'})
-        
-        page_size = request.query_params.get('page_size')
-        if page_size:
-            try:
-                size = int(page_size)
-                if size < 1 or size > 100:  # reasonable limits
-                    raise ValidationError({'page_size': 'Must be between 1 and 100'})
-            except ValueError:
-                raise ValidationError({'page_size': 'Must be a valid integer'})
-    
     def retrieve(self, request, *args, **kwargs):
         """GET /api/offers/{id}/ - Return 200 OK, 401 Unauthorized, 404 Not Found, 500 Internal Server Error"""
         try:
@@ -165,7 +163,17 @@ class OfferViewSet(viewsets.ModelViewSet):
             )
     
     def create(self, request, *args, **kwargs):
-        """POST /api/offers/ - Return 201 Created, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 500 Internal Server Error"""
+        """
+        POST /api/offers/ - Create new offer with 3 details
+        ENHANCED: Ensures no null values are ever created
+        
+        Status Codes:
+        - 201: Das Angebot wurde erfolgreich erstellt
+        - 400: Ungültige Anfragedaten oder unvollständige Details
+        - 401: Benutzer ist nicht authentifiziert
+        - 403: Authentifizierter Benutzer ist kein 'business' Profil
+        - 500: Interner Serverfehler
+        """
         try:
             # Check authentication first
             if not request.user.is_authenticated:
@@ -174,7 +182,7 @@ class OfferViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_401_UNAUTHORIZED
                 )
             
-            # Check business user permission using existing IsBusinessUser logic
+            # Check business user permission
             try:
                 user_profile = request.user.profile
                 if user_profile.type != 'business':
@@ -188,49 +196,104 @@ class OfferViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN
                 )
             
-            # Validate request data
-            serializer = self.get_serializer(data=request.data)
+            # Prepare and sanitize data
+            data = request.data.copy()
+            
+            # Ensure basic offer fields have defaults
+            data['title'] = data.get('title', '').strip()
+            data['description'] = data.get('description', '').strip()
+            
+            # Handle details data - ensure we have all three types with proper defaults
+            details_data = data.get('details', [])
+            
+            # Create default details structure if missing or incomplete
+            default_details = {
+                'basic': {'offer_type': 'basic', 'title': '', 'revisions': 1, 'delivery_time_in_days': 1, 'price': 0.0, 'features': []},
+                'standard': {'offer_type': 'standard', 'title': '', 'revisions': 1, 'delivery_time_in_days': 1, 'price': 0.0, 'features': []},
+                'premium': {'offer_type': 'premium', 'title': '', 'revisions': 1, 'delivery_time_in_days': 1, 'price': 0.0, 'features': []}
+            }
+            
+            # Sanitize provided details and fill in missing types
+            sanitized_details = []
+            provided_types = set()
+            
+            for detail in details_data:
+                offer_type = detail.get('offer_type', 'basic')
+                provided_types.add(offer_type)
+                
+                # Sanitize the detail data to prevent null values
+                sanitized_detail = {
+                    'offer_type': offer_type,
+                    'title': str(detail.get('title', '')).strip(),
+                    'revisions': self._sanitize_revisions(detail.get('revisions')),
+                    'delivery_time_in_days': self._sanitize_delivery_time(detail.get('delivery_time_in_days')),
+                    'price': self._sanitize_price(detail.get('price')),
+                    'features': detail.get('features', []) if isinstance(detail.get('features'), list) else []
+                }
+                sanitized_details.append(sanitized_detail)
+            
+            # Add missing detail types with defaults
+            for detail_type in ['basic', 'standard', 'premium']:
+                if detail_type not in provided_types:
+                    sanitized_details.append(default_details[detail_type])
+            
+            # Update data with sanitized details
+            data['details'] = sanitized_details
+            data['details_data'] = sanitized_details  # For serializer compatibility
+            
+            # Use OfferSerializer for creation
+            serializer = OfferSerializer(data=data)
             if not serializer.is_valid():
                 return Response(
                     {'error': 'Ungültige Anfragedaten oder unvollständige Details', 'details': serializer.errors}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Validate 3 details requirement
-            details = request.data.get('details', [])
-            if len(details) != 3:
-                return Response(
-                    {'error': 'Ein Offer muss 3 Details enthalten!'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Validate offer types
-            offer_types = [detail.get('offer_type') for detail in details]
-            required_types = {'basic', 'standard', 'premium'}
-            provided_types = set(offer_types)
-            
-            if provided_types != required_types:
-                return Response(
-                    {'error': f'Ungültige Anfragedaten oder unvollständige Details. Benötigt: basic, standard, premium. Erhalten: {list(provided_types)}'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Create the offer
+            # Create the offer with details
             offer = serializer.save(creator=request.user)
-            self.create_offer_details_from_request(offer, request.data)
             BaseInfo.update_stats()
             
-            # Return 201 Created with the created object (use OfferWithDetailsSerializer for full response)
+            # Return 201 Created with OfferWithDetailsSerializer format
             response_serializer = OfferWithDetailsSerializer(offer)
             return Response(
                 response_serializer.data, 
                 status=status.HTTP_201_CREATED
             )
+            
         except Exception as e:
             return Response(
                 {'error': 'Interner Serverfehler'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    def _sanitize_revisions(self, value):
+        """Sanitize revisions value - ensure it's a valid integer, default to 1"""
+        try:
+            if value is None:
+                return 1
+            int_value = int(value)
+            # Allow -1 for unlimited revisions, otherwise minimum 1
+            return int_value if int_value == -1 else max(1, int_value)
+        except (ValueError, TypeError):
+            return 1
+    
+    def _sanitize_delivery_time(self, value):
+        """Sanitize delivery time - ensure it's a positive integer, default to 1"""
+        try:
+            if value is None:
+                return 1
+            return max(1, int(value))
+        except (ValueError, TypeError):
+            return 1
+    
+    def _sanitize_price(self, value):
+        """Sanitize price - ensure it's a non-negative number, default to 0.0"""
+        try:
+            if value is None:
+                return 0.0
+            return max(0.0, float(value))
+        except (ValueError, TypeError):
+            return 0.0
     
     def update(self, request, *args, **kwargs):
         """PATCH /api/offers/{id}/ - Return 200 OK, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error"""
@@ -265,15 +328,8 @@ class OfferViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Validate 3 details if details are provided
-            details_data = request.data.get('details', [])
-            if details_data and len(details_data) != 3:
-                return Response(
-                    {'error': 'Ein Offer muss 3 Details enthalten!'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
             offer = serializer.save()
+            details_data = request.data.get('details')
             if details_data:
                 self.update_offer_details(offer, details_data)
             
@@ -328,15 +384,6 @@ class OfferViewSet(viewsets.ModelViewSet):
         try:
             queryset = super().get_queryset()
             
-            # Handle creator_id filter
-            creator_id = self.request.query_params.get('creator_id')
-            if creator_id:
-                try:
-                    creator_id = int(creator_id)
-                    queryset = queryset.filter(creator_id=creator_id)
-                except ValueError:
-                    raise ValidationError({'creator_id': 'Must be a valid integer'})
-
             # Handle max_delivery_time filter
             max_delivery_time = self.request.query_params.get('max_delivery_time')
             if max_delivery_time:
@@ -365,8 +412,28 @@ class OfferViewSet(viewsets.ModelViewSet):
         except Exception as e:
             raise ValidationError({'error': 'Invalid query parameters'})
     
+    def validate_query_parameters(self, request):
+        """Validate query parameters as per documentation"""
+        # min_price validation
+        min_price = request.query_params.get('min_price')
+        if min_price:
+            try:
+                float(min_price)
+            except ValueError:
+                raise ValidationError({'min_price': 'Must be a valid number'})
+        
+        # max_delivery_time validation
+        max_delivery_time = request.query_params.get('max_delivery_time')
+        if max_delivery_time:
+            try:
+                max_days = int(max_delivery_time)
+                if max_days < 0:
+                    raise ValidationError({'max_delivery_time': 'Must be a positive integer'})
+            except ValueError:
+                raise ValidationError({'max_delivery_time': 'Must be a valid integer'})
+    
     def update_offer_details(self, offer, details_data):
-        """Update offer details - helper method"""
+        """Update offer details - helper method for PATCH operations"""
         for detail_data in details_data:
             detail_id = detail_data.get('id')
             if detail_id:
@@ -392,45 +459,48 @@ class OfferViewSet(viewsets.ModelViewSet):
                                 )
                 except OfferDetail.DoesNotExist:
                     raise ValidationError(f'Offer detail with ID {detail_id} not found')
-    
-    def create_offer_details_from_request(self, offer, request_data):
-        """Create offer details from the frontend form data"""
-        details = request_data.get('details', [])
-        
-        for detail_data in details:
-            try:
-                detail = OfferDetail.objects.create(
-                    offer=offer,
-                    offer_type=detail_data.get('offer_type', 'basic'),
-                    title=detail_data.get('title', f"{offer.title} - {detail_data.get('offer_type', 'basic').capitalize()}"),
-                    price=float(detail_data.get('price', 0)),
-                    delivery_time_in_days=int(detail_data.get('delivery_time_in_days', 1)),
-                    revisions=int(detail_data.get('revisions', 1)) if detail_data.get('revisions', 1) != -1 else -1
-                )
-                features_list = detail_data.get('features', [])
-                for feature_description in features_list:
-                    if feature_description.strip():
-                        Feature.objects.create(
-                            offer_detail=detail,
-                            description=feature_description.strip()
-                        )
-            except Exception as e:
-                raise ValidationError(f"Error creating offer detail: {str(e)}")
 
 
-class OfferDetailViewSet(viewsets.ModelViewSet):
+class OfferDetailViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    API endpoint for offer details with full CRUD operations
+    API endpoint for retrieving individual offer details.
     
-    NOTE: Documentation only shows GET /api/offerdetails/{id}/ but keeping
-    existing CRUD functionality for consistency with original implementation
+    Only supports GET /api/offerdetails/{id}/
+    CRUD operations (POST, PATCH, DELETE) are handled through /api/offers/{id}/
     """
     queryset = OfferDetail.objects.all()
     serializer_class = OfferDetailSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = []  # No permissions required as per documentation
+    
+    def get_serializer(self, *args, **kwargs):
+        """
+        Always exclude 'offer' field to match documentation response format.
+        """
+        kwargs['exclude_offer'] = True
+        return super().get_serializer(*args, **kwargs)
     
     def retrieve(self, request, *args, **kwargs):
-        """GET /api/offerdetails/{id}/ - Return 200 OK, 404 Not Found, 500 Internal Server Error"""
+        """
+        GET /api/offerdetails/{id}/ 
+        
+        Returns the details of a specific offer detail.
+        
+        Response format as per documentation:
+        {
+            "id": 1,
+            "title": "Basic Design", 
+            "revisions": 2,
+            "delivery_time_in_days": 5,
+            "price": 100,
+            "features": ["Logo Design", "Visitenkarte"],
+            "offer_type": "basic"
+        }
+        
+        Status Codes:
+        - 200: Das Angebotsdetail wurde erfolgreich abgerufen
+        - 404: Das Angebotsdetail mit der angegebenen ID wurde nicht gefunden
+        - 500: Interner Serverfehler
+        """
         try:
             instance = self.get_object()
             serializer = self.get_serializer(instance)
@@ -445,41 +515,6 @@ class OfferDetailViewSet(viewsets.ModelViewSet):
                 {'error': 'Interner Serverfehler'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
-    def perform_create(self, serializer):
-        """Handle creation of offer details with proper authentication checks"""
-        if not self.request.user.is_authenticated:
-            raise PermissionDenied("Authentication required")
-
-        try:
-            user_profile = self.request.user.profile
-            if user_profile.type != 'business':
-                raise PermissionDenied("Only business users can create offer details")
-        except Profile.DoesNotExist:
-            raise PermissionDenied("User profile not found")
-        
-        # Make sure the offer belongs to the authenticated user
-        offer = serializer.validated_data.get('offer')
-        if offer and offer.creator != self.request.user:
-            raise PermissionDenied("You can only create details for your own offers")
-            
-        serializer.save()
-    
-    def perform_update(self, serializer):
-        """Handle updating of offer details with ownership checks"""
-        # Check if the user owns the offer that this detail belongs to
-        offer_detail = serializer.instance
-        if offer_detail.offer.creator != self.request.user:
-            raise PermissionDenied("You can only update details of your own offers")
-            
-        serializer.save()
-    
-    def perform_destroy(self, instance):
-        """Handle deletion of offer details with ownership checks"""
-        if instance.offer.creator != self.request.user:
-            raise PermissionDenied("You can only delete details of your own offers")
-            
-        instance.delete()
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -487,172 +522,179 @@ class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
-    pagination_class = None 
-    
+    pagination_class = None
+
     def get_queryset(self):
+        """Filter orders by user type"""
         user = self.request.user
-        
-        # Check if user is authenticated
         if not user.is_authenticated:
             return Order.objects.none()
-            
+
         try:
             profile_type = user.profile.type
         except Profile.DoesNotExist:
             return Order.objects.none()
-        
-        if profile_type == 'business':
+
+        if profile_type == "business":
             return Order.objects.filter(business_user=user)
         else:  # 'customer'
             return Order.objects.filter(customer=user)
-    
+
     def list(self, request, *args, **kwargs):
         """GET /api/orders/ - Return 200 OK, 401 Unauthorized, 500 Internal Server Error"""
         try:
             if not request.user.is_authenticated:
                 return Response(
-                    {'error': 'Benutzer ist nicht authentifiziert'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
+                    {"error": "Benutzer ist nicht authentifiziert"},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
-            
+
             queryset = self.get_queryset()
             serializer = self.get_serializer(queryset, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-    
+
     def create(self, request, *args, **kwargs):
         """POST /api/orders/ - Return 201 Created, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error"""
         try:
             # Check authentication
             if not request.user.is_authenticated:
                 return Response(
-                    {'error': 'Benutzer ist nicht authentifiziert'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
+                    {"error": "Benutzer ist nicht authentifiziert"},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
-            
+
             # Check if user is customer
             try:
                 user_profile = request.user.profile
-                if user_profile.type != 'customer':
+                if user_profile.type != "customer":
                     return Response(
-                        {'error': 'Benutzer hat keine Berechtigung, z.B. weil nicht vom typ \'customer\''}, 
-                        status=status.HTTP_403_FORBIDDEN
+                        {"error": "Benutzer hat keine Berechtigung, z.B. weil nicht vom typ 'customer'"},
+                        status=status.HTTP_403_FORBIDDEN,
                     )
             except Profile.DoesNotExist:
                 return Response(
-                    {'error': 'Benutzer hat keine Berechtigung, z.B. weil nicht vom typ \'customer\''}, 
-                    status=status.HTTP_403_FORBIDDEN
+                    {"error": "Benutzer hat keine Berechtigung, z.B. weil nicht vom typ 'customer'"},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
-            
-            # Validate offer_detail_id
-            offer_detail_id = request.data.get('offer_detail_id')
-            if not offer_detail_id:
+
+            # Validate using serializer (offer_detail_id now required)
+            serializer = self.get_serializer(data=request.data)
+            if not serializer.is_valid():
                 return Response(
-                    {'error': 'Ungültige Anfragedaten (z. B. wenn \'offer_detail_id\' fehlt oder ungültig ist)'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Ungültige Anfragedaten (z. B. wenn 'offer_detail_id' fehlt oder ungültig ist)"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
+            # Get offer detail from validated data
+            offer_detail_id = serializer.validated_data['offer_detail_id']
             try:
                 offer_detail = OfferDetail.objects.get(id=offer_detail_id)
             except OfferDetail.DoesNotExist:
                 return Response(
-                    {'error': 'Das angegebene Angebotsdetail wurde nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Das angegebene Angebotsdetail wurde nicht gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-            
+
             # Create order
             business_user = offer_detail.offer.creator
             order = Order.objects.create(
                 customer=request.user,
                 business_user=business_user,
                 offer_detail=offer_detail,
-                status='in_progress'
+                status="in_progress",
             )
-            
-            serializer = self.get_serializer(order)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-            
+
+            # Return created order
+            response_serializer = self.get_serializer(order)
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-    
+
     def partial_update(self, request, *args, **kwargs):
         """PATCH /api/orders/{id}/ - Return 200 OK, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error"""
         try:
             # Check authentication
             if not request.user.is_authenticated:
                 return Response(
-                    {'error': 'Benutzer ist nicht authentifiziert'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
+                    {"error": "Benutzer ist nicht authentifiziert"},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
-            
+
             # Get order
             try:
                 order = self.get_object()
             except Http404:
                 return Response(
-                    {'error': 'Die angegebene Bestellung wurde nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Die angegebene Bestellung wurde nicht gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-            
+
             # Check if user is business user and is the assigned business user for this order
             try:
                 user_profile = request.user.profile
-                if user_profile.type != 'business' or request.user != order.business_user:
+                if user_profile.type != "business" or request.user != order.business_user:
                     return Response(
-                        {'error': 'Benutzer hat keine Berechtigung, diese Bestellung zu aktualisieren'}, 
-                        status=status.HTTP_403_FORBIDDEN
+                        {"error": "Benutzer hat keine Berechtigung, diese Bestellung zu aktualisieren"},
+                        status=status.HTTP_403_FORBIDDEN,
                     )
             except Profile.DoesNotExist:
                 return Response(
-                    {'error': 'Benutzer hat keine Berechtigung, diese Bestellung zu aktualisieren'}, 
-                    status=status.HTTP_403_FORBIDDEN
+                    {"error": "Benutzer hat keine Berechtigung, diese Bestellung zu aktualisieren"},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
-            
+
             # Validate status field
-            new_status = request.data.get('status')
+            new_status = request.data.get("status")
             if not new_status:
                 return Response(
-                    {'error': 'Ungültiger Status oder unzulässige Felder in der Anfrage'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Ungültiger Status oder unzulässige Felder in der Anfrage"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
-            valid_statuses = ['in_progress', 'completed', 'cancelled']
+
+            valid_statuses = ["in_progress", "completed", "cancelled"]
             if new_status not in valid_statuses:
                 return Response(
-                    {'error': 'Ungültiger Status oder unzulässige Felder in der Anfrage'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Ungültiger Status oder unzulässige Felder in der Anfrage"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
+            # Check for invalid fields (only 'status' allowed)
+            allowed_fields = {"status"}
+            provided_fields = set(request.data.keys())
+            invalid_fields = provided_fields - allowed_fields
+
+            if invalid_fields:
+                return Response(
+                    {"error": "Ungültiger Status oder unzulässige Felder in der Anfrage"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             # Update order
             old_status = order.status
             order.status = new_status
             order.save()
-            
+
             # Update stats if order was completed
-            if old_status != 'completed' and new_status == 'completed':
+            if old_status != "completed" and new_status == "completed":
                 BaseInfo.update_stats()
-            
+
             serializer = self.get_serializer(order)
             return Response(serializer.data, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-    
-    def get_permissions(self):
-        """Override permissions for custom actions"""
-        if self.action in ['order_count', 'completed_order_count']:
-            return [] 
-        return super().get_permissions()
 
     def destroy(self, request, *args, **kwargs):
         """DELETE /api/orders/{id}/ - Return 204 No Content, 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error"""
@@ -660,17 +702,17 @@ class OrderViewSet(viewsets.ModelViewSet):
             # Check authentication
             if not request.user.is_authenticated:
                 return Response(
-                    {'error': 'Benutzer ist nicht authentifiziert'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
+                    {"error": "Benutzer ist nicht authentifiziert"},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
-            
+
             # Check if user is staff/admin
             if not request.user.is_staff:
                 return Response(
-                    {'error': 'Benutzer hat keine Berechtigung, die Bestellung zu löschen'}, 
-                    status=status.HTTP_403_FORBIDDEN
+                    {"error": "Benutzer hat keine Berechtigung, die Bestellung zu löschen"},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
-            
+
             # Get and delete order
             try:
                 order = self.get_object()
@@ -678,144 +720,139 @@ class OrderViewSet(viewsets.ModelViewSet):
                 return Response(status=status.HTTP_204_NO_CONTENT)
             except Http404:
                 return Response(
-                    {'error': 'Die angegebene Bestellung wurde nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Die angegebene Bestellung wurde nicht gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-                
+
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-    
-    @action(detail=False, methods=['GET'], url_path='order-count/(?P<business_user_id>[^/.]+)', permission_classes=[AllowAny])
+
+    @action(detail=False, methods=['GET'], url_path='order-count/(?P<business_user_id>[^/.]+)')
     def order_count(self, request, business_user_id=None):
         """
-        GET /api/order-count/{business_user_id}/ - Count in-progress orders for a business user
-        NO AUTH REQUIRED - Not in documentation, so can be public
+        GET /api/orders/order-count/{business_user_id}/ - Count in-progress orders for a business user
+        Return: 200 OK, 401 Unauthorized, 404 Not Found, 500 Internal Server Error
         """
         try:
             # Validate business_user_id
             if not business_user_id:
                 return Response(
-                    {'error': 'business_user_id ist erforderlich'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "business_user_id ist erforderlich"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             try:
                 business_user_id = int(business_user_id)
             except ValueError:
                 return Response(
-                    {'error': 'Ungültige business_user_id'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Ungültige business_user_id"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             # Check if business user exists
             try:
                 business_user = User.objects.get(id=business_user_id)
-                if business_user.profile.type != 'business':
+                if business_user.profile.type != "business":
                     return Response(
-                        {'error': 'Der angegebene Benutzer ist kein Business-Benutzer'}, 
-                        status=status.HTTP_400_BAD_REQUEST
+                        {"error": "Der angegebene Benutzer ist kein Business-Benutzer"},
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
             except User.DoesNotExist:
                 return Response(
-                    {'error': 'Business-Benutzer nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Kein Geschäftsnutzer mit der angegebenen ID gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
             except Profile.DoesNotExist:
                 return Response(
-                    {'error': 'Benutzerprofil nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Benutzerprofil nicht gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-            
+
             # Count in-progress orders for this business user
             order_count = Order.objects.filter(
-                business_user=business_user,
-                status='in_progress'
+                business_user=business_user, status="in_progress"
             ).count()
-            
-            return Response(
-                {'order_count': order_count}, 
-                status=status.HTTP_200_OK
-            )
-            
+
+            return Response({"order_count": order_count}, status=status.HTTP_200_OK)
+
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    @action(detail=False, methods=['GET'], url_path='completed-order-count/(?P<business_user_id>[^/.]+)', permission_classes=[AllowAny])
+    @action(detail=False, methods=['GET'], url_path='completed-order-count/(?P<business_user_id>[^/.]+)')
     def completed_order_count(self, request, business_user_id=None):
         """
-        GET /api/completed-order-count/{business_user_id}/ - Count completed orders for a business user
-        NO AUTH REQUIRED - Not in documentation, so can be public
+        GET /api/orders/completed-order-count/{business_user_id}/ - Count completed orders for a business user
+        Return: 200 OK, 401 Unauthorized, 404 Not Found, 500 Internal Server Error
         """
         try:
             # Validate business_user_id
             if not business_user_id:
                 return Response(
-                    {'error': 'business_user_id ist erforderlich'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "business_user_id ist erforderlich"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             try:
                 business_user_id = int(business_user_id)
             except ValueError:
                 return Response(
-                    {'error': 'Ungültige business_user_id'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Ungültige business_user_id"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             # Check if business user exists
             try:
                 business_user = User.objects.get(id=business_user_id)
-                if business_user.profile.type != 'business':
+                if business_user.profile.type != "business":
                     return Response(
-                        {'error': 'Der angegebene Benutzer ist kein Business-Benutzer'}, 
-                        status=status.HTTP_400_BAD_REQUEST
+                        {"error": "Der angegebene Benutzer ist kein Business-Benutzer"},
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
             except User.DoesNotExist:
                 return Response(
-                    {'error': 'Business-Benutzer nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Kein Geschäftsnutzer mit der angegebenen ID gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
             except Profile.DoesNotExist:
                 return Response(
-                    {'error': 'Benutzerprofil nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Benutzerprofil nicht gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-            
+
             # Count completed orders for this business user
             completed_order_count = Order.objects.filter(
-                business_user=business_user,
-                status='completed'
+                business_user=business_user, status="completed"
             ).count()
-            
+
             return Response(
-                {'completed_order_count': completed_order_count}, 
-                status=status.HTTP_200_OK
-            )
-            
-        except Exception as e:
-            return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"completed_order_count": completed_order_count},
+                status=status.HTTP_200_OK,
             )
 
+        except Exception as e:
+            return Response(
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class ReviewViewSet(viewsets.ModelViewSet):
-    """API endpoint for reviews matching documentation exactly"""
+    """CORRECTED API endpoint for reviews - documentation compliant"""
+
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = None
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['business_user', 'reviewer']
-    ordering_fields = ['updated_at', 'rating']  
-    
+    filterset_fields = ["business_user", "reviewer"]
+    ordering_fields = ["updated_at", "rating"]
+
     def get_queryset(self):
         """
         Custom queryset filtering to support documentation parameters:
@@ -824,377 +861,390 @@ class ReviewViewSet(viewsets.ModelViewSet):
         - ordering: Sort by 'updated_at' or 'rating'
         """
         queryset = Review.objects.all()
-        
+
         # Filter by business_user_id
-        business_user_id = self.request.query_params.get('business_user_id')
+        business_user_id = self.request.query_params.get("business_user_id")
         if business_user_id is not None:
             try:
                 business_user_id = int(business_user_id)
                 queryset = queryset.filter(business_user_id=business_user_id)
             except ValueError:
-                raise ValidationError({'business_user_id': 'Must be a valid integer'})
-        
-        # Filter by reviewer_id  
-        reviewer_id = self.request.query_params.get('reviewer_id')
+                raise ValidationError({"business_user_id": "Must be a valid integer"})
+
+        # Filter by reviewer_id
+        reviewer_id = self.request.query_params.get("reviewer_id")
         if reviewer_id is not None:
             try:
                 reviewer_id = int(reviewer_id)
                 queryset = queryset.filter(reviewer_id=reviewer_id)
             except ValueError:
-                raise ValidationError({'reviewer_id': 'Must be a valid integer'})
-        
+                raise ValidationError({"reviewer_id": "Must be a valid integer"})
+
         # Apply ordering
-        ordering = self.request.query_params.get('ordering')
+        ordering = self.request.query_params.get("ordering")
         if ordering:
-            if ordering in ['updated_at', '-updated_at', 'rating', '-rating']:
+            if ordering in ["updated_at", "-updated_at", "rating", "-rating"]:
                 queryset = queryset.order_by(ordering)
             else:
-                raise ValidationError({'ordering': 'Must be "updated_at" or "rating"'})
+                raise ValidationError({"ordering": 'Must be "updated_at" or "rating"'})
         else:
-            queryset = queryset.order_by('-updated_at')  # Default ordering
-            
+            queryset = queryset.order_by("-updated_at")  # Default ordering
+
         return queryset
-    
+
     def list(self, request, *args, **kwargs):
         """GET /api/reviews/ - Return 200 OK, 401 Unauthorized, 500 Internal Server Error"""
         try:
             if not request.user.is_authenticated:
                 return Response(
-                    {'error': 'Der Benutzer muss authentifiziert sein'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
+                    {"error": "Der Benutzer muss authentifiziert sein"},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
-            
+
             queryset = self.get_queryset()
             serializer = self.get_serializer(queryset, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except ValidationError as e:
             return Response(
-                {'error': str(e.detail) if hasattr(e, 'detail') else str(e)}, 
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": str(e.detail) if hasattr(e, "detail") else str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-    
+
     def create(self, request, *args, **kwargs):
-        """POST /api/reviews/ - Return 201 Created, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 500 Internal Server Error"""
+        """
+        POST /api/reviews/ - Create a new review for a business user
+        Status Codes: 201, 400, 401, 403, 500
+        """
         try:
-            # Check authentication
-            if not request.user.is_authenticated:
-                return Response(
-                    {'error': 'Der Benutzer muss authentifiziert sein'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
-            
-            # Check if user has customer profile
+            # Check if user is authenticated (already handled by permission_classes)
+            user = request.user
+
+            # FIXED: Correct error message as per documentation
+            # Check if user has a customer profile
             try:
-                user_profile = request.user.profile
-                if user_profile.type != 'customer':
+                if not hasattr(user, "profile"):
                     return Response(
-                        {'error': 'Der Benutzer muss authentifiziert sein und ein Kundenprofil besitzen'}, 
-                        status=status.HTTP_401_UNAUTHORIZED
+                        {"error": "Unauthorized. Der Benutzer muss authentifiziert sein und ein Kundenprofil besitzen."},
+                        status=status.HTTP_401_UNAUTHORIZED,
                     )
-            except Profile.DoesNotExist:
+
+                # Check if user is a customer (not business)
+                if user.profile.type != "customer":
+                    return Response(
+                        {"error": "Unauthorized. Der Benutzer muss authentifiziert sein und ein Kundenprofil besitzen."},
+                        status=status.HTTP_401_UNAUTHORIZED,
+                    )
+            except Exception:
                 return Response(
-                    {'error': 'Der Benutzer muss authentifiziert sein und ein Kundenprofil besitzen'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
+                    {"error": "Unauthorized. Der Benutzer muss authentifiziert sein und ein Kundenprofil besitzen."},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
-            
-            # Validate request data
-            serializer = self.get_serializer(data=request.data)
-            if not serializer.is_valid():
+
+            # Get data from request
+            data = request.data.copy()
+
+            # Validate business_user exists and is a business user
+            business_user_id = data.get("business_user")
+            if not business_user_id:
                 return Response(
-                    {'error': 'Fehlerhafte Anfrage', 'details': serializer.errors}, 
+                    {"error": "business_user ist erforderlich"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                business_user = User.objects.get(id=business_user_id)
+
+                # FIXED: Only check for "business", not "business_user"
+                if not hasattr(business_user, "profile") or business_user.profile.type != "business":
+                    return Response(
+                        {"error": "Der angegebene Benutzer ist kein Geschäftsbenutzer"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            except User.DoesNotExist:
+                return Response(
+                    {"error": "Geschäftsbenutzer nicht gefunden"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if user has already reviewed this business
+            existing_review = Review.objects.filter(
+                reviewer=user, business_user_id=business_user_id
+            ).exists()
+
+            if existing_review:
+                return Response(
+                    {"error": "Fehlerhafte Anfrage. Der Benutzer hat möglicherweise bereits eine Bewertung für das gleiche Geschäftsprofil abgegeben."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # Create serializer with the data (without reviewer)
+            serializer = self.get_serializer(data=data)
+
+            if serializer.is_valid():
+                # Save the review with explicit reviewer
+                serializer.save(reviewer=request.user)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            else:
+                # Return validation errors
+                return Response(
+                    {"error": "Fehlerhafte Anfrage. Der Benutzer hat möglicherweise bereits eine Bewertung für das gleiche Geschäftsprofil abgegeben."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            # Check if user already has a review for this business user
-            business_user_id = request.data.get('business_user')
-            if business_user_id:
-                existing_review = Review.objects.filter(
-                    reviewer=request.user, 
-                    business_user_id=business_user_id
-                ).first()
-                if existing_review:
-                    return Response(
-                        {'error': 'Ein Benutzer kann nur eine Bewertung pro Geschäftsprofil abgeben'}, 
-                        status=status.HTTP_403_FORBIDDEN
-                    )
-            
-            # Create the review
-            review = serializer.save(reviewer=request.user)
-            BaseInfo.update_stats()
-            
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-            
+
+        except IntegrityError as e:
+            # Handle database constraint violations (e.g., unique constraint)
+            return Response(
+                {"error": "Forbidden. Ein Benutzer kann nur eine Bewertung pro Geschäftsprofil abgeben."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-    
+
     def partial_update(self, request, *args, **kwargs):
         """PATCH /api/reviews/{id}/ - Return 200 OK, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found"""
         try:
             # Check authentication
             if not request.user.is_authenticated:
                 return Response(
-                    {'error': 'Der Benutzer muss authentifiziert sein'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
+                    {"error": "Unauthorized. Der Benutzer muss authentifiziert sein."},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
-            
+
             # Get review
             try:
                 review = self.get_object()
             except Http404:
                 return Response(
-                    {'error': 'Es wurde keine Bewertung mit der angegebenen ID gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Nicht gefunden. Es wurde keine Bewertung mit der angegebenen ID gefunden."},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-            
+
             # Check ownership
             if review.reviewer != request.user:
                 return Response(
-                    {'error': 'Der Benutzer ist nicht berechtigt, diese Bewertung zu bearbeiten'}, 
-                    status=status.HTTP_403_FORBIDDEN
+                    {"error": "Forbidden. Der Benutzer ist nicht berechtigt, diese Bewertung zu bearbeiten."},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
-            
+
             # Only allow rating and description to be updated
-            allowed_fields = {'rating', 'description'}
+            allowed_fields = {"rating", "description"}
             provided_fields = set(request.data.keys())
             invalid_fields = provided_fields - allowed_fields
-            
+
             if invalid_fields:
                 return Response(
-                    {'error': 'Der Anfrage-Body enthält ungültige Daten'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Bad Request. Der Anfrage-Body enthält ungültige Daten."},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             # Validate and update
             serializer = self.get_serializer(review, data=request.data, partial=True)
             if not serializer.is_valid():
                 return Response(
-                    {'error': 'Der Anfrage-Body enthält ungültige Daten', 'details': serializer.errors}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Bad Request. Der Anfrage-Body enthält ungültige Daten."},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-    
+
     def destroy(self, request, *args, **kwargs):
         """DELETE /api/reviews/{id}/ - Return 204 No Content, 401 Unauthorized, 403 Forbidden, 404 Not Found"""
         try:
             # Check authentication
             if not request.user.is_authenticated:
                 return Response(
-                    {'error': 'Der Benutzer muss authentifiziert sein'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
+                    {"error": "Unauthorized. Der Benutzer muss authentifiziert sein."},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
-            
+
             # Get review
             try:
                 review = self.get_object()
             except Http404:
                 return Response(
-                    {'error': 'Es wurde keine Bewertung mit der angegebenen ID gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Nicht gefunden. Es wurde keine Bewertung mit der angegebenen ID gefunden."},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-            
+
             # Check ownership
             if review.reviewer != request.user:
                 return Response(
-                    {'error': 'Der Benutzer ist nicht berechtigt, diese Bewertung zu löschen'}, 
-                    status=status.HTTP_403_FORBIDDEN
+                    {"error": "Forbidden. Der Benutzer ist nicht berechtigt, diese Bewertung zu löschen."},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
-            
+
             review.delete()
             BaseInfo.update_stats()
-            return Response(status=status.HTTP_204_NO_CONTENT)
             
+            # FIXED: Return empty object as per documentation, not just 204
+            return Response({}, status=status.HTTP_204_NO_CONTENT)
+
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    def get_permissions(self):
-        """Override permissions for custom actions"""
-        if self.action in ['business_reviews', 'reviewer_reviews']:
-            return [] 
-        return super().get_permissions()
-
-    @action(detail=False, methods=['GET'], url_path='business/(?P<business_user_id>[^/.]+)', permission_classes=[AllowAny])
+    @action(detail=False, methods=['GET'], url_path='business/(?P<business_user_id>[^/.]+)')
     def business_reviews(self, request, business_user_id=None):
         """
-        Get all reviews for a specific business user
-        NO AUTH REQUIRED - Not in documentation, so can be public
-        Return: 200 OK, 404 Not Found, 400 Bad Request
+        GET /api/reviews/business/{business_user_id}/ - Get all reviews for a specific business user
+        NO AUTH REQUIRED - Not in main documentation
         """
         try:
             # Validate business_user_id
             if not business_user_id:
                 return Response(
-                    {'error': 'business_user_id ist erforderlich'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "business_user_id ist erforderlich"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             try:
                 business_user_id = int(business_user_id)
             except ValueError:
                 return Response(
-                    {'error': 'Ungültige business_user_id'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Ungültige business_user_id"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             # Check if business user exists and is actually a business user
             try:
                 business_user = User.objects.get(id=business_user_id)
-                if business_user.profile.type != 'business':
+                if business_user.profile.type != "business":
                     return Response(
-                        {'error': 'Der angegebene Benutzer ist kein Business-Benutzer'}, 
-                        status=status.HTTP_400_BAD_REQUEST
+                        {"error": "Der angegebene Benutzer ist kein Business-Benutzer"},
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
             except User.DoesNotExist:
                 return Response(
-                    {'error': 'Business-Benutzer nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Business-Benutzer nicht gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
             except Profile.DoesNotExist:
                 return Response(
-                    {'error': 'Benutzerprofil nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Benutzerprofil nicht gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-            
+
             # Get reviews for this business user
             reviews = Review.objects.filter(business_user=business_user)
             serializer = self.get_serializer(reviews, many=True)
-            
+
             return Response(serializer.data, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    @action(detail=False, methods=['GET'], url_path='reviewer/(?P<reviewer_id>[^/.]+)', permission_classes=[])
+    @action(detail=False, methods=['GET'], url_path='reviewer/(?P<reviewer_id>[^/.]+)')
     def reviewer_reviews(self, request, reviewer_id=None):
         """
-        Get all reviews by a specific reviewer
-        NO AUTH REQUIRED - Not in documentation, so can be public
-        Return: 200 OK, 404 Not Found, 400 Bad Request
+        GET /api/reviews/reviewer/{reviewer_id}/ - Get all reviews by a specific reviewer
+        NO AUTH REQUIRED - Not in main documentation
         """
         try:
             # Validate reviewer_id
             if not reviewer_id:
                 return Response(
-                    {'error': 'reviewer_id ist erforderlich'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "reviewer_id ist erforderlich"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             try:
                 reviewer_id = int(reviewer_id)
             except ValueError:
                 return Response(
-                    {'error': 'Ungültige reviewer_id'}, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "Ungültige reviewer_id"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             # Check if reviewer exists and is actually a customer user
             try:
                 reviewer = User.objects.get(id=reviewer_id)
-                if reviewer.profile.type != 'customer':
+                if reviewer.profile.type != "customer":
                     return Response(
-                        {'error': 'Der angegebene Benutzer ist kein Customer-Benutzer'}, 
-                        status=status.HTTP_400_BAD_REQUEST
+                        {"error": "Der angegebene Benutzer ist kein Customer-Benutzer"},
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
             except User.DoesNotExist:
                 return Response(
-                    {'error': 'Reviewer nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Reviewer nicht gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
             except Profile.DoesNotExist:
                 return Response(
-                    {'error': 'Benutzerprofil nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": "Benutzerprofil nicht gefunden"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-            
+
             # Get reviews by this reviewer
             reviews = Review.objects.filter(reviewer=reviewer)
             serializer = self.get_serializer(reviews, many=True)
-            
+
             return Response(serializer.data, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": "Interner Serverfehler"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+    def get_permissions(self):
+        """Override permissions for custom actions"""
+        if self.action in ["business_reviews", "reviewer_reviews"]:
+            return [AllowAny()]  # No auth required for these custom endpoints
+        return super().get_permissions()
+
+@api_view(['GET'])
+def order_count_proxy(request, business_user_id):
+    """
+    PROXY VIEW for Frontend Compatibility
+    Redirects /api/order-count/{business_user_id}/ to OrderViewSet.order_count
+    
+    Frontend expects: /api/order-count/{business_user_id}/
+    Documentation has: /api/orders/order-count/{business_user_id}/
+    """
+    # Create an OrderViewSet instance
+    viewset = OrderViewSet()
+    viewset.request = request
+    viewset.format_kwarg = None
+    viewset.action = 'order_count'
+    
+    # Call the original order_count action
+    return viewset.order_count(request, business_user_id=business_user_id)
 
 
-class ProfileViewSet(viewsets.ModelViewSet):
-    """API endpoint for user profiles"""
-    queryset = Profile.objects.all()
-    serializer_class = ProfileSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['type']
-    search_fields = ['user__username', 'user__first_name', 'user__last_name', 'location']
+@api_view(['GET'])
+def completed_order_count_proxy(request, business_user_id):
+    """
+    PROXY VIEW for Frontend Compatibility
+    Redirects /api/completed-order-count/{business_user_id}/ to OrderViewSet.completed_order_count
     
-    def get_serializer_class(self):
-        if self.action in ['update', 'partial_update']:
-            return ProfileUpdateSerializer
-        return ProfileSerializer
-        
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        user_type = self.request.query_params.get('type')
-        if user_type:
-            queryset = queryset.filter(type=user_type)
-        return queryset
-
-    @action(detail=True, methods=['GET', 'PATCH'], url_path='by-user')
-    def get_by_user_id(self, request, pk=None):
-        """Get profile by user ID instead of profile ID"""
-        profile = get_object_or_404(Profile, user_id=pk)
+    Frontend expects: /api/completed-order-count/{business_user_id}/
+    Documentation has: /api/orders/completed-order-count/{business_user_id}/
+    """
+    # Create an OrderViewSet instance
+    viewset = OrderViewSet()
+    viewset.request = request
+    viewset.format_kwarg = None
+    viewset.action = 'completed_order_count'
     
-        if request.method == 'GET':
-            serializer = self.get_serializer(profile)
-            return Response(serializer.data)
-    
-        elif request.method == 'PATCH':
-            # Only allow users to update their own profile
-            if request.user.id != int(pk) and not request.user.is_staff:
-                return Response(
-                    {'error': 'You can only update your own profile'}, 
-                    status=status.HTTP_403_FORBIDDEN
-                )
-                
-            serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    @action(detail=False, methods=['GET'])
-    def business(self, request):
-        """List all business profiles"""
-        profiles = Profile.objects.filter(type='business')
-        serializer = self.get_serializer(profiles, many=True)
-        return Response(serializer.data)
-    
-    @action(detail=False, methods=['GET'])
-    def customer(self, request):
-        """List all customer profiles"""
-        profiles = Profile.objects.filter(type='customer')
-        serializer = self.get_serializer(profiles, many=True)
-        return Response(serializer.data)
+    # Call the original completed_order_count action
+    return viewset.completed_order_count(request, business_user_id=business_user_id)

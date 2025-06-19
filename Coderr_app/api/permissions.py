@@ -62,3 +62,22 @@ class IsOwnerOrReadOnly(BasePermission):
                 # If we can't determine ownership, deny access
                 return False
         return True
+
+class OfferDetailPermission(BasePermission):
+    """
+    Custom permission for OfferDetail:
+    - Retrieve (GET): No authentication required (public)
+    - Create/Update/Delete: Owner of parent offer only
+    """
+    def has_permission(self, request, view):
+        if view.action == 'retrieve':
+            return True  # GET /api/offerdetails/{id}/ - no auth required
+        elif view.action in ['create', 'update', 'partial_update', 'destroy']:
+            return request.user.is_authenticated
+        return False
+    
+    def has_object_permission(self, request, view, obj):
+        # For update/delete operations, check ownership of parent offer
+        if view.action in ['update', 'partial_update', 'destroy']:
+            return obj.offer.creator == request.user
+        return True

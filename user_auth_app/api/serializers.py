@@ -26,7 +26,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     # Override fields to ensure empty string instead of null
     first_name = serializers.SerializerMethodField()
     last_name = serializers.SerializerMethodField()
-    email = serializers.SerializerMethodField()  # FIXED: Changed from ReadOnlyField to SerializerMethodField
+    email = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
     tel = serializers.SerializerMethodField()
     description = serializers.SerializerMethodField()
@@ -60,7 +60,7 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def get_email(self, obj):
         """Return the user's email address"""
-        return obj.user.email or ""  # ADDED: Method to get email from user
+        return obj.user.email or ""
 
     def get_location(self, obj):
         """Return empty string if location is None or empty"""
@@ -136,17 +136,15 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
     username = serializers.ReadOnlyField()
     first_name = serializers.SerializerMethodField()
     last_name = serializers.SerializerMethodField()
-    email = serializers.SerializerMethodField()  # ADDED email field
     uploaded_at = serializers.DateTimeField(source="created_at", read_only=True)
 
     class Meta:
         model = Profile
         fields = [
             "user",
-            "username",
+            "username", 
             "first_name",
             "last_name",
-            "email", 
             "file",
             "uploaded_at",
             "type",
@@ -157,9 +155,6 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
 
     def get_last_name(self, obj):
         return obj.last_name or ""
-    
-    def get_email(self, obj):
-        return obj.user.email or ""  # ADDED method
 
 
 class BusinessProfileSerializer(serializers.ModelSerializer):
@@ -171,7 +166,6 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
     username = serializers.ReadOnlyField()
     first_name = serializers.SerializerMethodField()
     last_name = serializers.SerializerMethodField()
-    email = serializers.SerializerMethodField()  # ADDED email field
     location = serializers.SerializerMethodField()
     tel = serializers.SerializerMethodField()
     description = serializers.SerializerMethodField()
@@ -182,14 +176,13 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
         fields = [
             "user",
             "username",
-            "first_name",
+            "first_name", 
             "last_name",
             "file",
             "location",
             "tel",
             "description",
             "working_hours",
-            "email",
             "type",
         ]
 
@@ -198,9 +191,6 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
 
     def get_last_name(self, obj):
         return obj.last_name or ""
-    
-    def get_email(self, obj):
-        return obj.user.email or "" 
 
     def get_location(self, obj):
         return obj.location or ""
@@ -213,7 +203,6 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
 
     def get_working_hours(self, obj):
         return obj.working_hours or ""
-
 
 
 class RegistrationSerializer(serializers.ModelSerializer):
@@ -236,7 +225,7 @@ class RegistrationSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "username",
-            "email",
+            "email", 
             "password",
             "repeated_password",
             "type",

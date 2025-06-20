@@ -39,7 +39,6 @@ from .permissions import (
 def base_info_view(request):
     """
     GET /api/base-info/
-
     No Permissions required
     """
     try:

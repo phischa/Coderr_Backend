@@ -8,7 +8,6 @@ class UserSerializer(serializers.ModelSerializer):
     """
     Serializer for the User model.
     """
-
     class Meta:
         model = User
         fields = ["id", "username", "first_name", "last_name", "email"]
@@ -26,7 +25,6 @@ class OfferDetailSerializer(serializers.ModelSerializer):
     """
     Unified serializer for OfferDetail
     Conditionally includes/excludes the 'offer' field based on context.
-    ENSURES NO NULL VALUES ARE EVER RETURNED!
     """
     features = serializers.SerializerMethodField()
     
@@ -127,7 +125,7 @@ class OfferWithDetailsSerializer(serializers.ModelSerializer):
         try:
             return OfferDetailSerializer(obj.details.all(), many=True, exclude_offer=True).data
         except:
-            return []  # Return empty list on any error
+            return []
 
 
 class OfferSerializer(serializers.ModelSerializer):
@@ -168,7 +166,7 @@ class OfferSerializer(serializers.ModelSerializer):
                 for detail in obj.details.all()
             ]
         except:
-            return []  # Return empty list on error
+            return []
     
     def get_min_price(self, obj):
         """Return min_price - never null, default 0.0"""
@@ -296,7 +294,7 @@ class OrderSerializer(serializers.ModelSerializer):
     Serializer for Order model - CORRECTED for documentation compliance.
     ENSURES NO NULL VALUES IN RESPONSES!
     """
-    # FIX 1: offer_detail_id must be required=True
+    # offer_detail_id must be required=True
     offer_detail_id = serializers.IntegerField(write_only=True, required=True)
     
     # Response fields matching documentation exactly - using SerializerMethodFields for safety
@@ -416,7 +414,6 @@ class BaseInfoSerializer(serializers.ModelSerializer):
     """
     Serializer for BaseInfo model.
     """
-
     class Meta:
         model = BaseInfo
         fields = [

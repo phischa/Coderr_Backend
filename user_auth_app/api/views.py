@@ -1,4 +1,5 @@
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from rest_framework import generics, status, viewsets
@@ -195,7 +196,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(instance)
             return Response(serializer.data, status=status.HTTP_200_OK)
         
-        except Profile.DoesNotExist:
+        except Http404:
             return Response(
                 {'error': 'Das Benutzerprofil wurde nicht gefunden'}, 
                 status=status.HTTP_404_NOT_FOUND
@@ -220,7 +221,8 @@ class ProfileViewSet(viewsets.ModelViewSet):
             
             try:
                 instance = self.get_object()
-            except Profile.DoesNotExist:
+
+            except Http404:
                 return Response(
                     {'error': 'Das Benutzerprofil wurde nicht gefunden'}, 
                     status=status.HTTP_404_NOT_FOUND

@@ -8,7 +8,7 @@ from django.http import Http404
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError, ParseError
 from rest_framework.permissions import (
     IsAuthenticated,
     IsAuthenticatedOrReadOnly,
@@ -258,7 +258,18 @@ class OfferViewSet(viewsets.ModelViewSet):
                 response_serializer.data, 
                 status=status.HTTP_201_CREATED
             )
-            
+        
+        except ParseError:
+            # Handle malformed JSON
+            return Response(
+                {'error': 'Ungültige Anfragedaten oder unvollständige Details'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Profile.DoesNotExist:
+            return Response(
+                {'error': 'Authentifizierter Benutzer ist kein \'business\' Profil'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
         except Exception as e:
             return Response(
                 {'error': 'Interner Serverfehler'}, 
@@ -312,13 +323,6 @@ class OfferViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            # Check ownership
-            if instance.creator != request.user:
-                return Response(
-                    {'error': 'Authentifizierter Benutzer ist nicht der Eigentümer des Angebots'}, 
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            
             # Validate request data
             serializer = self.get_serializer(instance, data=request.data, partial=True)
             if not serializer.is_valid():
@@ -338,7 +342,29 @@ class OfferViewSet(viewsets.ModelViewSet):
                 response_serializer.data, 
                 status=status.HTTP_200_OK
             )
+        
+        except PermissionDenied:
+            # DRF Permission-System hat bereits geprüft und verweigert
+            return Response(
+                {'error': 'Authentifizierter Benutzer ist nicht der Eigentümer des Angebots'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        except ParseError:
+            return Response(
+                {'error': 'Ungültige Anfragedaten oder unvollständige Details'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except AttributeError as e:
+            # Falls update_offer_details oder andere Methoden fehlen
+            print(f"AttributeError: {e}")
+            return Response(
+                {'error': 'Ungültige Anfragedaten oder unvollständige Details'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
         except Exception as e:
+            import traceback
+            print(f"Unerwartete Exception: {e}")
+            print(f"Traceback: {traceback.format_exc()}")
             return Response(
                 {'error': 'Interner Serverfehler'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -362,16 +388,14 @@ class OfferViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            # Check ownership
-            if instance.creator != request.user:
-                return Response(
-                    {'error': 'Authentifizierter Benutzer ist nicht der Eigentümer des Angebots'}, 
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            
             instance.delete()
             BaseInfo.update_stats()
             return Response(status=status.HTTP_204_NO_CONTENT)
+        except PermissionDenied:
+            return Response(
+                {'error': 'Authentifizierter Benutzer ist nicht der Eigentümer des Angebots'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
         except Exception as e:
             return Response(
                 {'error': 'Interner Serverfehler'}, 

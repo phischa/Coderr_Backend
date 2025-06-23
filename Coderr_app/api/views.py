@@ -323,6 +323,13 @@ class OfferViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND
                 )
             
+            # Check ownership (redundant but explicit)
+            if instance.creator != request.user:
+                return Response(
+                    {'error': 'Authentifizierter Benutzer ist nicht der Eigentümer des Angebots'}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
             # Validate request data
             serializer = self.get_serializer(instance, data=request.data, partial=True)
             if not serializer.is_valid():
@@ -343,6 +350,12 @@ class OfferViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK
             )
         
+        except ValidationError as e:
+            # Fehler beim Aktualisieren der Details
+            return Response(
+                {'error': 'Ungültige Anfragedaten oder unvollständige Details', 'details': str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
         except PermissionDenied:
             # DRF Permission-System hat bereits geprüft und verweigert
             return Response(
@@ -456,32 +469,92 @@ class OfferViewSet(viewsets.ModelViewSet):
                 raise ValidationError({'max_delivery_time': 'Must be a valid integer'})
     
     def update_offer_details(self, offer, details_data):
-        """Update offer details - helper method for PATCH operations"""
+        """
+        Update offer details - enhanced for PATCH operations
+        Supports both 'id' and 'offer_type' based updates
+        """
         for detail_data in details_data:
             detail_id = detail_data.get('id')
+            offer_type = detail_data.get('offer_type')
+            
+            # Case 1: Update by ID
             if detail_id:
                 try:
                     detail = OfferDetail.objects.get(id=detail_id, offer=offer)
-                    detail.title = detail_data.get('title', detail.title)
-                    detail.price = float(detail_data.get('price', detail.price))
-                    detail.delivery_time_in_days = int(detail_data.get('delivery_time_in_days', detail.delivery_time_in_days))
-                    detail.revisions = int(detail_data.get('revisions', detail.revisions)) if detail_data.get('revisions', detail.revisions) != -1 else -1
-                    detail.save()
-                        
-                    # Update features if provided
-                    features_list = detail_data.get('features')
-                    if features_list is not None:
-                        # Delete existing features
-                        detail.features.all().delete()
-                        # Create new features
-                        for feature_description in features_list:
-                            if feature_description.strip():
-                                Feature.objects.create(
-                                    offer_detail=detail,
-                                    description=feature_description.strip()
-                                )
+                    self._update_single_detail(detail, detail_data)
                 except OfferDetail.DoesNotExist:
                     raise ValidationError(f'Offer detail with ID {detail_id} not found')
+            
+            # Case 2: Update by offer_type (if no ID provided)
+            elif offer_type:
+                if offer_type not in ['basic', 'standard', 'premium']:
+                    raise ValidationError(f'Invalid offer_type: {offer_type}. Must be basic, standard, or premium.')
+                
+                try:
+                    detail = OfferDetail.objects.get(offer=offer, offer_type=offer_type)
+                    self._update_single_detail(detail, detail_data)
+                except OfferDetail.DoesNotExist:
+                    raise ValidationError(f'Offer detail with offer_type "{offer_type}" not found for this offer')
+            
+            # Case 3: Neither ID nor offer_type provided
+            else:
+                raise ValidationError('Each detail must have either "id" or "offer_type" specified')
+
+def _update_single_detail(self, detail, detail_data):
+    """Helper method to update a single OfferDetail object"""
+    # Update basic fields with validation
+    if 'title' in detail_data:
+        detail.title = str(detail_data['title']).strip()
+    
+    if 'price' in detail_data:
+        try:
+            price = float(detail_data['price'])
+            if price < 0:
+                raise ValidationError('Price cannot be negative')
+            detail.price = price
+        except (ValueError, TypeError):
+            raise ValidationError('Price must be a valid number')
+    
+    if 'delivery_time_in_days' in detail_data:
+        try:
+            delivery_time = int(detail_data['delivery_time_in_days'])
+            if delivery_time < 1:
+                raise ValidationError('Delivery time must be at least 1 day')
+            detail.delivery_time_in_days = delivery_time
+        except (ValueError, TypeError):
+            raise ValidationError('Delivery time must be a valid integer')
+    
+    if 'revisions' in detail_data:
+        try:
+            revisions = detail_data['revisions']
+            if revisions == -1:
+                detail.revisions = -1  # Unlimited
+            else:
+                revisions = int(revisions)
+                if revisions < 1:
+                    raise ValidationError('Revisions must be at least 1 or -1 for unlimited')
+                detail.revisions = revisions
+        except (ValueError, TypeError):
+            raise ValidationError('Revisions must be a valid integer or -1 for unlimited')
+    
+    detail.save()
+    
+    # Update features if provided
+    if 'features' in detail_data:
+        features_list = detail_data['features']
+        if not isinstance(features_list, list):
+            raise ValidationError('Features must be a list of strings')
+        
+        # Delete existing features
+        detail.features.all().delete()
+        
+        # Create new features
+        for feature_description in features_list:
+            if feature_description and str(feature_description).strip():
+                Feature.objects.create(
+                    offer_detail=detail,
+                    description=str(feature_description).strip()
+                )
 
 
 class OfferDetailViewSet(viewsets.ReadOnlyModelViewSet):
@@ -760,6 +833,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         Return: 200 OK, 401 Unauthorized, 404 Not Found, 500 Internal Server Error
         """
         try:
+            if not request.user.is_authenticated:
+                return Response(
+                    {"error": "Benutzer ist nicht authentifiziert"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
             # Validate business_user_id
             if not business_user_id:
                 return Response(
@@ -814,6 +892,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         Return: 200 OK, 401 Unauthorized, 404 Not Found, 500 Internal Server Error
         """
         try:
+            if not request.user.is_authenticated:
+                return Response(
+                    {"error": "Benutzer ist nicht authentifiziert"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
             # Validate business_user_id
             if not business_user_id:
                 return Response(
@@ -1244,6 +1327,13 @@ def order_count_proxy(request, business_user_id):
     Frontend expects: /api/order-count/{business_user_id}/
     Documentation has: /api/orders/order-count/{business_user_id}/
     """
+    # ✅ AUTHENTIFIZIERUNG PRÜFEN ZUERST
+    if not request.user.is_authenticated:
+        return Response(
+            {"error": "Benutzer ist nicht authentifiziert"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+    
     # Create an OrderViewSet instance
     viewset = OrderViewSet()
     viewset.request = request
@@ -1263,6 +1353,13 @@ def completed_order_count_proxy(request, business_user_id):
     Frontend expects: /api/completed-order-count/{business_user_id}/
     Documentation has: /api/orders/completed-order-count/{business_user_id}/
     """
+    # ✅ AUTHENTIFIZIERUNG PRÜFEN ZUERST
+    if not request.user.is_authenticated:
+        return Response(
+            {"error": "Benutzer ist nicht authentifiziert"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+    
     # Create an OrderViewSet instance
     viewset = OrderViewSet()
     viewset.request = request

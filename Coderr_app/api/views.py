@@ -275,6 +275,92 @@ class OfferViewSet(viewsets.ModelViewSet):
                 {'error': 'Interner Serverfehler'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    def update(self, request, *args, **kwargs):
+        """PATCH /api/offers/{id}/ - Return 200 OK, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error"""
+        try:
+            # Check authentication
+            if not request.user.is_authenticated:
+                return Response(
+                    {'error': 'Benutzer ist nicht authentifiziert'}, 
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            try:
+                instance = self.get_object()
+            except Http404:
+                return Response(
+                    {'error': 'Das Angebot mit der angegebenen ID wurde nicht gefunden'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Check ownership (redundant but explicit)
+            if instance.creator != request.user:
+                return Response(
+                    {'error': 'Authentifizierter Benutzer ist nicht der Eigentümer des Angebots'}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Separate Behandlung von Offer-Feldern und Details
+            data = request.data.copy()
+            
+            # Extrahiere Details separat (falls vorhanden)
+            details_data = data.pop('details', None)
+            
+            # Validate request data (nur Offer-Felder, OHNE details)
+            serializer = self.get_serializer(instance, data=data, partial=True)
+            if not serializer.is_valid():
+                return Response(
+                    {'error': 'Ungültige Anfragedaten oder unvollständige Details', 'details': serializer.errors}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Update das Offer-Objekt (title, description, etc.)
+            offer = serializer.save()
+            
+            # Update Details falls vorhanden
+            if details_data is not None:
+                try:
+                    self.update_offer_details(offer, details_data)
+                except Exception as e:
+                    return Response(
+                        {'error': 'Fehler beim Aktualisieren der Details', 'details': str(e)}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Load fresh data from database to avoid any caching issues
+            fresh_offer = Offer.objects.get(id=offer.id)
+            
+            # Use the fresh offer for response
+            response_serializer = OfferWithDetailsSerializer(fresh_offer)
+            response_data = response_serializer.data
+            
+            return Response(
+                response_data, 
+                status=status.HTTP_200_OK
+            )
+        
+        except ValidationError as e:
+            return Response(
+                {'error': 'Ungültige Anfragedaten oder unvollständige Details', 'details': str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except PermissionDenied as e:
+            return Response(
+                {'error': 'Authentifizierter Benutzer ist nicht der Eigentümer des Angebots'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        except ParseError as e:
+            return Response(
+                {'error': 'Ungültige Anfragedaten oder unvollständige Details'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            import traceback
+            return Response(
+                {'error': 'Interner Serverfehler'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     def _sanitize_revisions(self, value):
         """Sanitize revisions value - ensure it's a valid integer, default to 1"""
@@ -305,83 +391,6 @@ class OfferViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             return 0.0
     
-    def update(self, request, *args, **kwargs):
-        """PATCH /api/offers/{id}/ - Return 200 OK, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error"""
-        try:
-            # Check authentication
-            if not request.user.is_authenticated:
-                return Response(
-                    {'error': 'Benutzer ist nicht authentifiziert'}, 
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
-            
-            try:
-                instance = self.get_object()
-            except Http404:
-                return Response(
-                    {'error': 'Das Angebot mit der angegebenen ID wurde nicht gefunden'}, 
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            
-            # Check ownership (redundant but explicit)
-            if instance.creator != request.user:
-                return Response(
-                    {'error': 'Authentifizierter Benutzer ist nicht der Eigentümer des Angebots'}, 
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            
-            # Validate request data
-            serializer = self.get_serializer(instance, data=request.data, partial=True)
-            if not serializer.is_valid():
-                return Response(
-                    {'error': 'Ungültige Anfragedaten oder unvollständige Details', 'details': serializer.errors}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            offer = serializer.save()
-            details_data = request.data.get('details')
-            if details_data:
-                self.update_offer_details(offer, details_data)
-            
-            # Return full offer with details as per documentation
-            response_serializer = OfferWithDetailsSerializer(offer)
-            return Response(
-                response_serializer.data, 
-                status=status.HTTP_200_OK
-            )
-        
-        except ValidationError as e:
-            # Fehler beim Aktualisieren der Details
-            return Response(
-                {'error': 'Ungültige Anfragedaten oder unvollständige Details', 'details': str(e)}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except PermissionDenied:
-            # DRF Permission-System hat bereits geprüft und verweigert
-            return Response(
-                {'error': 'Authentifizierter Benutzer ist nicht der Eigentümer des Angebots'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
-        except ParseError:
-            return Response(
-                {'error': 'Ungültige Anfragedaten oder unvollständige Details'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except AttributeError as e:
-            # Falls update_offer_details oder andere Methoden fehlen
-            print(f"AttributeError: {e}")
-            return Response(
-                {'error': 'Ungültige Anfragedaten oder unvollständige Details'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except Exception as e:
-            import traceback
-            print(f"Unerwartete Exception: {e}")
-            print(f"Traceback: {traceback.format_exc()}")
-            return Response(
-                {'error': 'Interner Serverfehler'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
     
     def destroy(self, request, *args, **kwargs):
         """DELETE /api/offers/{id}/ - Return 204 No Content, 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error"""
@@ -500,62 +509,61 @@ class OfferViewSet(viewsets.ModelViewSet):
             else:
                 raise ValidationError('Each detail must have either "id" or "offer_type" specified')
 
-def _update_single_detail(self, detail, detail_data):
-    """Helper method to update a single OfferDetail object"""
-    # Update basic fields with validation
-    if 'title' in detail_data:
-        detail.title = str(detail_data['title']).strip()
-    
-    if 'price' in detail_data:
-        try:
-            price = float(detail_data['price'])
-            if price < 0:
-                raise ValidationError('Price cannot be negative')
-            detail.price = price
-        except (ValueError, TypeError):
-            raise ValidationError('Price must be a valid number')
-    
-    if 'delivery_time_in_days' in detail_data:
-        try:
-            delivery_time = int(detail_data['delivery_time_in_days'])
-            if delivery_time < 1:
-                raise ValidationError('Delivery time must be at least 1 day')
-            detail.delivery_time_in_days = delivery_time
-        except (ValueError, TypeError):
-            raise ValidationError('Delivery time must be a valid integer')
-    
-    if 'revisions' in detail_data:
-        try:
-            revisions = detail_data['revisions']
-            if revisions == -1:
-                detail.revisions = -1  # Unlimited
-            else:
-                revisions = int(revisions)
-                if revisions < 1:
-                    raise ValidationError('Revisions must be at least 1 or -1 for unlimited')
-                detail.revisions = revisions
-        except (ValueError, TypeError):
-            raise ValidationError('Revisions must be a valid integer or -1 for unlimited')
-    
-    detail.save()
-    
-    # Update features if provided
-    if 'features' in detail_data:
-        features_list = detail_data['features']
-        if not isinstance(features_list, list):
-            raise ValidationError('Features must be a list of strings')
+    def _update_single_detail(self, detail, detail_data):
+        """Helper method to update a single OfferDetail object"""
+        # Update basic fields with validation
+        if 'title' in detail_data:
+            detail.title = str(detail_data['title']).strip()
         
-        # Delete existing features
-        detail.features.all().delete()
+        if 'price' in detail_data:
+            try:
+                price = float(detail_data['price'])
+                if price < 0:
+                    raise ValidationError('Price cannot be negative')
+                detail.price = price
+            except (ValueError, TypeError):
+                raise ValidationError('Price must be a valid number')
         
-        # Create new features
-        for feature_description in features_list:
-            if feature_description and str(feature_description).strip():
-                Feature.objects.create(
-                    offer_detail=detail,
-                    description=str(feature_description).strip()
-                )
-
+        if 'delivery_time_in_days' in detail_data:
+            try:
+                delivery_time = int(detail_data['delivery_time_in_days'])
+                if delivery_time < 1:
+                    raise ValidationError('Delivery time must be at least 1 day')
+                detail.delivery_time_in_days = delivery_time
+            except (ValueError, TypeError):
+                raise ValidationError('Delivery time must be a valid integer')
+        
+        if 'revisions' in detail_data:
+            try:
+                revisions = detail_data['revisions']
+                if revisions == -1:
+                    detail.revisions = -1  # Unlimited
+                else:
+                    revisions = int(revisions)
+                    if revisions < 1:
+                        raise ValidationError('Revisions must be at least 1 or -1 for unlimited')
+                    detail.revisions = revisions
+            except (ValueError, TypeError):
+                raise ValidationError('Revisions must be a valid integer or -1 for unlimited')
+        
+        detail.save()
+        
+        # Update features if provided
+        if 'features' in detail_data:
+            features_list = detail_data['features']
+            if not isinstance(features_list, list):
+                raise ValidationError('Features must be a list of strings')
+            
+            # Delete existing features
+            detail.features.all().delete()
+            
+            # Create new features
+            for feature_description in features_list:
+                if feature_description and str(feature_description).strip():
+                    Feature.objects.create(
+                        offer_detail=detail,
+                        description=str(feature_description).strip()
+                    )
 
 class OfferDetailViewSet(viewsets.ReadOnlyModelViewSet):
     """

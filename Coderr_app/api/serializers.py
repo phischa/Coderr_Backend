@@ -130,8 +130,8 @@ class OfferWithDetailsSerializer(serializers.ModelSerializer):
 
 class OfferSerializer(serializers.ModelSerializer):
     """
-    Serializer for Offer model - handles both read and write operations.
-    NO NULL VALUES in responses!
+    Serializer for Offer model - FIXED VERSION
+    Das Problem war ein Konflikt zwischen 'details' und 'details_data' Fields
     """
     user = serializers.ReadOnlyField(source='creator.id')
     details = serializers.SerializerMethodField()
@@ -139,18 +139,11 @@ class OfferSerializer(serializers.ModelSerializer):
     min_delivery_time = serializers.SerializerMethodField()
     user_details = serializers.SerializerMethodField()
     
-    # Add details field for write operations (POST)
-    details_data = serializers.ListField(
-        child=serializers.DictField(),
-        write_only=True,
-        required=False,
-        source='details'
-    )
-    
     class Meta:
         model = Offer
         fields = ['id', 'title', 'description', 'image', 'created_at', 'updated_at',
-                    'min_price', 'min_delivery_time', 'details', 'user', 'user_details', 'details_data'] 
+                    'min_price', 'min_delivery_time', 'details', 'user', 'user_details'] 
+        # ENTFERNT: 'details_data' aus den fields
     
     def get_details(self, obj):
         """
@@ -205,44 +198,18 @@ class OfferSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create offer with details, ensuring no null values"""
-        details_data = validated_data.pop('details', [])
+        # Details werden hier über die ViewSet.create() Methode gehandhabt
         offer = Offer.objects.create(**validated_data)
-        
-        # Create default details if none provided
-        if not details_data:
-            details_data = [
-                {'offer_type': 'basic', 'title': '', 'revisions': 1, 'delivery_time_in_days': 1, 'price': 0.0, 'features': []},
-                {'offer_type': 'standard', 'title': '', 'revisions': 1, 'delivery_time_in_days': 1, 'price': 0.0, 'features': []},
-                {'offer_type': 'premium', 'title': '', 'revisions': 1, 'delivery_time_in_days': 1, 'price': 0.0, 'features': []}
-            ]
-        
-        for detail_data in details_data:
-            # Sanitize detail data to prevent null values
-            sanitized_detail = {
-                'offer': offer,
-                'offer_type': detail_data.get('offer_type', 'basic'),
-                'title': detail_data.get('title') or '',
-                'revisions': max(1, int(detail_data.get('revisions') or 1)),
-                'delivery_time_in_days': max(1, int(detail_data.get('delivery_time_in_days') or 1)),
-                'price': max(0.0, float(detail_data.get('price') or 0.0))
-            }
-            
-            # Handle special case for unlimited revisions
-            if sanitized_detail['revisions'] == -1:
-                sanitized_detail['revisions'] = -1
-            
-            offer_detail = OfferDetail.objects.create(**sanitized_detail)
-            
-            # Create features
-            features_list = detail_data.get('features', [])
-            for feature_description in features_list:
-                if feature_description and feature_description.strip():
-                    Feature.objects.create(
-                        offer_detail=offer_detail,
-                        description=feature_description.strip()
-                    )
-        
         return offer
+
+    def update(self, instance, validated_data):
+        """Update offer fields"""
+        # Update basic fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        return instance
 
 
 class ReviewSerializer(serializers.ModelSerializer):

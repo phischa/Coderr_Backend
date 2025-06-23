@@ -574,7 +574,7 @@ class OfferDetailViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = OfferDetail.objects.all()
     serializer_class = OfferDetailSerializer
-    permission_classes = []  # No permissions required as per documentation
+    permission_classes = [IsAuthenticated]  # No permissions required as per documentation
     
     def get_serializer(self, *args, **kwargs):
         """
@@ -587,25 +587,21 @@ class OfferDetailViewSet(viewsets.ReadOnlyModelViewSet):
         """
         GET /api/offerdetails/{id}/ 
         
-        Returns the details of a specific offer detail.
-        
-        Response format as per documentation:
-        {
-            "id": 1,
-            "title": "Basic Design", 
-            "revisions": 2,
-            "delivery_time_in_days": 5,
-            "price": 100,
-            "features": ["Logo Design", "Visitenkarte"],
-            "offer_type": "basic"
-        }
-        
         Status Codes:
         - 200: Das Angebotsdetail wurde erfolgreich abgerufen
+        - 401: Benutzer ist nicht authentifiziert  
         - 404: Das Angebotsdetail mit der angegebenen ID wurde nicht gefunden
         - 500: Interner Serverfehler
         """
         try:
+            #Check authentication
+            if not request.user.is_authenticated:
+                return Response(
+                    {'error': 'Benutzer ist nicht authentifiziert'}, 
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            # Now try to get the object
             instance = self.get_object()
             serializer = self.get_serializer(instance)
             return Response(serializer.data, status=status.HTTP_200_OK)

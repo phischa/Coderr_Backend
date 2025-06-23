@@ -949,7 +949,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 
 class ReviewViewSet(viewsets.ModelViewSet):
-    """CORRECTED API endpoint for reviews - documentation compliant"""
+    """API endpoint for reviews - documentation compliant"""
 
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
@@ -1030,7 +1030,6 @@ class ReviewViewSet(viewsets.ModelViewSet):
             # Check if user is authenticated (already handled by permission_classes)
             user = request.user
 
-            # FIXED: Correct error message as per documentation
             # Check if user has a customer profile
             try:
                 if not hasattr(user, "profile"):
@@ -1065,7 +1064,6 @@ class ReviewViewSet(viewsets.ModelViewSet):
             try:
                 business_user = User.objects.get(id=business_user_id)
 
-                # FIXED: Only check for "business", not "business_user"
                 if not hasattr(business_user, "profile") or business_user.profile.type != "business":
                     return Response(
                         {"error": "Der angegebene Benutzer ist kein Geschäftsbenutzer"},
@@ -1077,14 +1075,13 @@ class ReviewViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Check if user has already reviewed this business
             existing_review = Review.objects.filter(
                 reviewer=user, business_user_id=business_user_id
             ).exists()
 
             if existing_review:
                 return Response(
-                    {"error": "Fehlerhafte Anfrage. Der Benutzer hat möglicherweise bereits eine Bewertung für das gleiche Geschäftsprofil abgegeben."},
+                    {"error": "Forbidden. Ein Benutzer kann nur eine Bewertung pro Geschäftsprofil abgeben."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
@@ -1093,14 +1090,29 @@ class ReviewViewSet(viewsets.ModelViewSet):
 
             if serializer.is_valid():
                 # Save the review with explicit reviewer
-                serializer.save(reviewer=request.user)
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
+                try:
+                    serializer.save(reviewer=request.user)
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
+                except IntegrityError:
+                    # Falls die DB-Constraint erst hier greift
+                    return Response(
+                        {"error": "Forbidden. Ein Benutzer kann nur eine Bewertung pro Geschäftsprofil abgeben."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
             else:
-                # Return validation errors
-                return Response(
-                    {"error": "Fehlerhafte Anfrage. Der Benutzer hat möglicherweise bereits eine Bewertung für das gleiche Geschäftsprofil abgegeben."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                # Prüfe ob es eine unique constraint violation ist
+                error_messages = str(serializer.errors).lower()
+                if 'unique' in error_messages or 'already exists' in error_messages:
+                    return Response(
+                        {"error": "Forbidden. Ein Benutzer kann nur eine Bewertung pro Geschäftsprofil abgeben."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                else:
+                    # Andere Validierungsfehler (rating außerhalb 1-5, etc.)
+                    return Response(
+                        {"error": "Fehlerhafte Anfrage. Der Anfrage-Body enthält ungültige Daten."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
         except IntegrityError as e:
             # Handle database constraint violations (e.g., unique constraint)

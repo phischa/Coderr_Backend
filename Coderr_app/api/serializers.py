@@ -130,20 +130,19 @@ class OfferWithDetailsSerializer(serializers.ModelSerializer):
 
 class OfferSerializer(serializers.ModelSerializer):
     """
-    Serializer for Offer model - FIXED VERSION
-    Das Problem war ein Konflikt zwischen 'details' und 'details_data' Fields
+    Serializer for Offer model
     """
     user = serializers.ReadOnlyField(source='creator.id')
     details = serializers.SerializerMethodField()
     min_price = serializers.SerializerMethodField()
     min_delivery_time = serializers.SerializerMethodField()
     user_details = serializers.SerializerMethodField()
+    image = serializers.ImageField(required=False, allow_null=True)  # Explicitly optional
     
     class Meta:
         model = Offer
         fields = ['id', 'title', 'description', 'image', 'created_at', 'updated_at',
                     'min_price', 'min_delivery_time', 'details', 'user', 'user_details'] 
-        # ENTFERNT: 'details_data' aus den fields
     
     def get_details(self, obj):
         """
@@ -196,14 +195,51 @@ class OfferSerializer(serializers.ModelSerializer):
                 'username': ""
             }
 
+    def validate_image(self, value):
+        """Custom validation for image field - handle null as per documentation"""
+        # Allow None/null values as per documentation: "image": null
+        if value is None:
+            return None
+            
+        # Allow empty string
+        if value == '':
+            return None
+            
+        # If we have a value, ensure it's a valid image
+        if hasattr(value, 'content_type'):
+            allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
+            if value.content_type not in allowed_types:
+                raise serializers.ValidationError(
+                    "Unsupported image format. Please use JPEG, PNG, GIF, or WebP."
+                )
+            
+            # Check file size (e.g., max 5MB)
+            if value.size > 5 * 1024 * 1024:
+                raise serializers.ValidationError(
+                    "Image file too large. Maximum size is 5MB."
+                )
+        
+        return value
+
     def create(self, validated_data):
-        """Create offer with details, ensuring no null values"""
-        # Details werden hier über die ViewSet.create() Methode gehandhabt
+        """Create offer, ensuring no null values except for image"""
+        # Handle image field - null is allowed as per documentation
+        image = validated_data.get('image')
+        if image is None:
+            validated_data.pop('image', None)
+        
         offer = Offer.objects.create(**validated_data)
         return offer
 
     def update(self, instance, validated_data):
         """Update offer fields"""
+        # Handle image field for updates
+        if 'image' in validated_data:
+            image = validated_data['image']
+            if not image:
+                # If empty image provided, don't change existing image
+                validated_data.pop('image', None)
+        
         # Update basic fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

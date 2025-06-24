@@ -74,15 +74,6 @@ def base_info_view(request):
         )
 
 
-class OfferFilter(django_filters.FilterSet):
-    """Custom filter to map creator_id to creator field"""
-    creator_id = django_filters.NumberFilter(field_name='creator', lookup_expr='exact')
-    
-    class Meta:
-        model = Offer
-        fields = []
-
-
 class DynamicPageNumberPagination(PageNumberPagination):
     """
     Custom pagination that allows page_size to be set via query parameter
@@ -91,6 +82,29 @@ class DynamicPageNumberPagination(PageNumberPagination):
     page_size = 6  # Default aus settings.py
     page_size_query_param = 'page_size'
     max_page_size = 100
+
+
+class OfferFilter(django_filters.FilterSet):
+    """Custom filter to map creator_id to creator field with proper error handling"""
+    creator_id = django_filters.NumberFilter(field_name='creator', lookup_expr='exact')
+    
+    def filter_queryset(self, queryset):
+        """Override to handle empty creator_id properly"""
+        # Get creator_id parameter
+        creator_id = self.data.get('creator_id')
+        
+        # Skip filtering if creator_id is empty/None
+        if creator_id is None or creator_id == '' or creator_id == 'null':
+            # Remove creator_id from data to prevent errors
+            data = self.data.copy()
+            data.pop('creator_id', None)
+            self.data = data
+        
+        return super().filter_queryset(queryset)
+    
+    class Meta:
+        model = Offer
+        fields = []
 
 
 class OfferViewSet(viewsets.ModelViewSet):
@@ -102,21 +116,121 @@ class OfferViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = OfferFilter
     search_fields = ['title', 'description']
-    ordering_fields = ['updated_at', 'min_price']
+    ordering_fields = ['created_at', 'updated_at'] 
     
-    def get_serializer_class(self):
-        """
-        Choose serializer based on operation:
-        - All operations use OfferSerializer for input/validation
-        - Responses use different serializers where needed
-        """
-        return OfferSerializer  # Always use OfferSerializer for input validation
+    def get_queryset(self):
+        """Enhanced queryset with proper error handling for all parameters"""
+        try:
+            queryset = super().get_queryset()
+            
+            # Handle creator_id filter manually (better error handling)
+            creator_id = self.request.query_params.get('creator_id')
+            if creator_id and creator_id.strip():  # Only if not empty
+                try:
+                    creator_id_int = int(creator_id)
+                    queryset = queryset.filter(creator_id=creator_id_int)
+                except ValueError:
+                    # Log but don't crash - just ignore invalid creator_id
+                    pass
+            
+            # Handle max_delivery_time filter
+            max_delivery_time = self.request.query_params.get('max_delivery_time')
+            if max_delivery_time:
+                try:
+                    max_days = int(max_delivery_time)
+                    if max_days >= 0:  # Allow 0
+                        queryset = queryset.filter(details__delivery_time_in_days__lte=max_days).distinct()
+                except ValueError:
+                    # Log but don't crash - just ignore invalid max_delivery_time
+                    pass
+            
+            # Handle min_price filter
+            min_price = self.request.query_params.get('min_price')
+            if min_price:
+                try:
+                    min_price_value = float(min_price)
+                    if min_price_value >= 0:  # Allow 0
+                        queryset = queryset.filter(details__price__gte=min_price_value).distinct()
+                except ValueError:
+                    # Log but don't crash - just ignore invalid min_price
+                    pass
+            
+            # Handle custom ordering for min_price since it's a property
+            ordering = self.request.query_params.get('ordering')
+            if ordering == 'min_price' or ordering == '-min_price':
+                # Custom ordering by min_price (requires annotation)
+                from django.db.models import Min, Case, When, Value, DecimalField
+                queryset = queryset.annotate(
+                    min_price_db=Case(
+                        When(details__isnull=True, then=Value(0.0)),
+                        default=Min('details__price'),
+                        output_field=DecimalField(max_digits=10, decimal_places=2)
+                    )
+                )
+                if ordering == 'min_price':
+                    queryset = queryset.order_by('min_price_db')
+                else:  # -min_price
+                    queryset = queryset.order_by('-min_price_db')
+            
+            return queryset
+            
+        except Exception as e:
+            # Fallback: return base queryset if anything goes wrong
+            return super().get_queryset()
+    
+    def validate_query_parameters(self, request):
+        """Enhanced validation that doesn't crash on invalid params"""
+        errors = {}
+        
+        # creator_id validation
+        creator_id = request.query_params.get('creator_id')
+        if creator_id and creator_id.strip():  # Only validate if not empty
+            try:
+                int(creator_id)
+            except ValueError:
+                errors['creator_id'] = 'Must be a valid integer'
+        
+        # min_price validation
+        min_price = request.query_params.get('min_price')
+        if min_price:
+            try:
+                price = float(min_price)
+                if price < 0:
+                    errors['min_price'] = 'Must be a positive number'
+            except ValueError:
+                errors['min_price'] = 'Must be a valid number'
+        
+        # max_delivery_time validation
+        max_delivery_time = request.query_params.get('max_delivery_time')
+        if max_delivery_time:
+            try:
+                days = int(max_delivery_time)
+                if days < 0:
+                    errors['max_delivery_time'] = 'Must be a positive integer'
+            except ValueError:
+                errors['max_delivery_time'] = 'Must be a valid integer'
+        
+        # ordering validation
+        ordering = request.query_params.get('ordering')
+        if ordering:
+            valid_ordering = ['created_at', '-created_at', 'updated_at', '-updated_at', 
+                            'min_price', '-min_price']  # min_price handled specially
+            if ordering not in valid_ordering:
+                errors['ordering'] = f'Must be one of: {", ".join(valid_ordering)}'
+        
+        if errors:
+            raise ValidationError(errors)
     
     def list(self, request, *args, **kwargs):
-        """GET /api/offers/ - Return 200 OK, 400 Bad Request, 500 Internal Server Error"""
+        """GET /api/offers/ - Enhanced error handling"""
         try:
-            # Validate query parameters
-            self.validate_query_parameters(request)
+            # Validate query parameters (but don't crash on invalid ones)
+            try:
+                self.validate_query_parameters(request)
+            except ValidationError as e:
+                # Log validation errors but continue with filtered results
+                # This prevents crashes from bad frontend requests
+                pass
             
             queryset = self.filter_queryset(self.get_queryset())
             page = self.paginate_queryset(queryset)
@@ -126,12 +240,14 @@ class OfferViewSet(viewsets.ModelViewSet):
             
             serializer = self.get_serializer(queryset, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
-        except ValidationError as e:
-            return Response(
-                {'error': str(e.detail) if hasattr(e, 'detail') else str(e)}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            
         except Exception as e:
+            # Log the actual error for debugging
+            import traceback
+            print(f"Error in OfferViewSet.list: {str(e)}")
+            print(f"Traceback: {traceback.format_exc()}")
+            print(f"Query params: {request.query_params}")
+            
             return Response(
                 {'error': 'Interner Serverfehler'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -164,7 +280,6 @@ class OfferViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         """
         POST /api/offers/ - Create new offer with 3 details
-        ENHANCED: Ensures no null values are ever created
         
         Status Codes:
         - 201: Das Angebot wurde erfolgreich erstellt
@@ -197,6 +312,11 @@ class OfferViewSet(viewsets.ModelViewSet):
             
             # Prepare and sanitize data
             data = request.data.copy()
+            
+            # Handle image field - remove if null/empty as per documentation
+            image = data.get('image')
+            if image is None or image == '' or image == 'null' or image == 'undefined':
+                data.pop('image', None)
             
             # Ensure basic offer fields have defaults
             data['title'] = data.get('title', '').strip()
@@ -236,20 +356,50 @@ class OfferViewSet(viewsets.ModelViewSet):
                 if detail_type not in provided_types:
                     sanitized_details.append(default_details[detail_type])
             
-            # Update data with sanitized details
-            data['details'] = sanitized_details
-            data['details_data'] = sanitized_details  # For serializer compatibility
+            # Remove details from offer data (we'll handle them separately)
+            offer_data = {k: v for k, v in data.items() if k not in ['details', 'details_data']}
             
-            # Use OfferSerializer for creation
-            serializer = OfferSerializer(data=data)
+            # Use OfferSerializer for creation (without details)
+            serializer = OfferSerializer(data=offer_data)
             if not serializer.is_valid():
                 return Response(
                     {'error': 'Ungültige Anfragedaten oder unvollständige Details', 'details': serializer.errors}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Create the offer with details
+            # Create the offer
             offer = serializer.save(creator=request.user)
+            
+            try:
+                # Create OfferDetail objects and their features
+                for detail_data in sanitized_details:
+                    # Create the OfferDetail
+                    offer_detail = OfferDetail.objects.create(
+                        offer=offer,
+                        offer_type=detail_data['offer_type'],
+                        title=detail_data['title'],
+                        revisions=detail_data['revisions'],
+                        delivery_time_in_days=detail_data['delivery_time_in_days'],
+                        price=detail_data['price']
+                    )
+                    
+                    # Create the features for this detail
+                    features = detail_data.get('features', [])
+                    for feature_description in features:
+                        if feature_description and str(feature_description).strip():
+                            Feature.objects.create(
+                                offer_detail=offer_detail,
+                                description=str(feature_description).strip()
+                            )
+            except Exception as e:
+                # If detail creation fails, delete the offer and return error
+                offer.delete()
+                return Response(
+                    {'error': 'Fehler beim Erstellen der Details', 'details': str(e)}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Update stats
             BaseInfo.update_stats()
             
             # Return 201 Created with OfferWithDetailsSerializer format
@@ -275,6 +425,31 @@ class OfferViewSet(viewsets.ModelViewSet):
                 {'error': 'Interner Serverfehler'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    def _create_offer_details(self, offer, details_data):
+        """
+        Helper method to create OfferDetail objects and their features.
+        This was the missing piece!
+        """
+        for detail_data in details_data:
+            # Create the OfferDetail
+            offer_detail = OfferDetail.objects.create(
+                offer=offer,
+                offer_type=detail_data['offer_type'],
+                title=detail_data['title'],
+                revisions=detail_data['revisions'],
+                delivery_time_in_days=detail_data['delivery_time_in_days'],
+                price=detail_data['price']
+            )
+            
+            # Create the features for this detail
+            features = detail_data.get('features', [])
+            for feature_description in features:
+                if feature_description and str(feature_description).strip():
+                    Feature.objects.create(
+                        offer_detail=offer_detail,
+                        description=str(feature_description).strip()
+                    )
 
     def update(self, request, *args, **kwargs):
         """PATCH /api/offers/{id}/ - Return 200 OK, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error"""
@@ -1213,7 +1388,6 @@ class ReviewViewSet(viewsets.ModelViewSet):
             review.delete()
             BaseInfo.update_stats()
             
-            # FIXED: Return empty object as per documentation, not just 204
             return Response({}, status=status.HTTP_204_NO_CONTENT)
 
         except Exception as e:

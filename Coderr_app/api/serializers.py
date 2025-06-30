@@ -285,11 +285,23 @@ class ReviewSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("User profile does not exist")
         return value
 
+    def validate_description(self, value):
+        """Validate description is not empty"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Description cannot be empty.")
+        return value.strip()
+
     def validate_rating(self, value):
         """Validate rating is between 1 and 5"""
         if value < 1 or value > 5:
             raise serializers.ValidationError("Rating must be between 1 and 5")
         return value
+
+    def validate(self, data):
+        """Cross-field validation - but only after individual field validation"""
+        # Note: duplicate review check is handled in the viewset, not here
+        # This ensures proper 400 vs 403 status code distinction
+        return data    
 
 
 class OrderSerializer(serializers.ModelSerializer):

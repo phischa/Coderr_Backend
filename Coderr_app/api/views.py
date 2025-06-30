@@ -141,8 +141,10 @@ class OfferViewSet(viewsets.ModelViewSet):
                     if max_days >= 0:  # Allow 0
                         queryset = queryset.filter(details__delivery_time_in_days__lte=max_days).distinct()
                 except ValueError:
-                    # Log but don't crash - just ignore invalid max_delivery_time
-                    pass
+                    return Response(
+                        {'error': 'Ungültige Anfragedaten oder unvollständige Details', 'details': serializer.errors}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             
             # Handle min_price filter
             min_price = self.request.query_params.get('min_price')
@@ -152,8 +154,10 @@ class OfferViewSet(viewsets.ModelViewSet):
                     if min_price_value >= 0:  # Allow 0
                         queryset = queryset.filter(details__price__gte=min_price_value).distinct()
                 except ValueError:
-                    # Log but don't crash - just ignore invalid min_price
-                    pass
+                    return Response(
+                        {'error': 'Ungültige Anfragedaten oder unvollständige Details', 'details': serializer.errors}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             
             # Handle custom ordering for min_price since it's a property
             ordering = self.request.query_params.get('ordering')
@@ -1255,7 +1259,7 @@ class ReviewViewSet(viewsets.ModelViewSet):
                 )
 
             existing_review = Review.objects.filter(
-                reviewer=user, business_user_id=business_user_id
+                reviewer=user, business_user=business_user
             ).exists()
 
             if existing_review:

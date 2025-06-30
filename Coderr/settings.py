@@ -36,16 +36,17 @@ if not SECRET_KEY:
 DEBUG = False
 
 # Or if you want to be more explicit:
-if DEBUG:
-    ALLOWED_HOSTS = [
-        'localhost',
-        '127.0.0.1',
-        '[::1]',        # IPv6 localhost
-        'testserver',   # For Django test client
-    ]
-else:
+#if DEBUG:
+#    ALLOWED_HOSTS = [
+#        'localhost',
+#        '127.0.0.1',
+#        '[::1]',        # IPv6 localhost
+#        'testserver',   # For Django test client
+#    ]
+#else:
     # Add your production domains here
-    ALLOWED_HOSTS = ['34.88.182.16']
+    
+ALLOWED_HOSTS = ['34.88.182.17', 'localhost', '127.0.0.1']
 
 
 # Application definition

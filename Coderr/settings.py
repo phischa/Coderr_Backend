@@ -45,8 +45,8 @@ DEBUG = False
 #    ]
 #else:
     # Add your production domains here
-    
-ALLOWED_HOSTS = ['34.88.182.17', 'localhost', '127.0.0.1']
+
+ALLOWED_HOSTS = ['34.88.182.16', 'localhost', '127.0.0.1']
 
 
 # Application definition

@@ -33,10 +33,7 @@ if not SECRET_KEY:
     print("WARNING: Using a temporary SECRET_KEY. Set a proper SECRET_KEY in your .env file.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-# Updated ALLOWED_HOSTS for development and testing
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver'] if DEBUG else []
+DEBUG = False
 
 # Or if you want to be more explicit:
 if DEBUG:
@@ -48,7 +45,7 @@ if DEBUG:
     ]
 else:
     # Add your production domains here
-    ALLOWED_HOSTS = []
+    ALLOWED_HOSTS = ['34.88.182.16']
 
 
 # Application definition

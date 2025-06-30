@@ -1264,8 +1264,8 @@ class ReviewViewSet(viewsets.ModelViewSet):
 
             if existing_review:
                 return Response(
-                    {"error": "Forbidden. Ein Benutzer kann nur eine Bewertung pro Geschäftsprofil abgeben."},
-                    status=status.HTTP_403_FORBIDDEN,
+                    {"error": "Fehlerhafte Anfrage. Der Benutzer hat möglicherweise bereits eine Bewertung für das gleiche Geschäftsprofil abgegeben."},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
             # Create serializer with the data (without reviewer)
